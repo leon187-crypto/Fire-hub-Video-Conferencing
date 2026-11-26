@@ -236,7 +236,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       .primary-controls .audio-switch { flex: 1.3; justify-content: center; }
       .primary-controls .audio-switch button { flex: 1; padding: 0.5rem 0.3rem; font-size: 0.76rem; }
       .primary-controls > button { flex: 1; padding: 0.52rem 0.35rem; font-size: 0.76rem; }
-      #mobile-more-btn { flex: 0 0 auto; white-space: nowrap; padding: 0.52rem 0.6rem; }
+      #mute-speaker-btn, #mobile-more-btn { flex: 0 0 auto; white-space: nowrap; padding: 0.52rem 0.6rem; }
       #controls-dock.more-open #mobile-more-btn { background: #16a34a; }
       .secondary-controls { display: none; position: fixed; bottom: 60px; left: 0; right: 0; z-index: 48; max-height: 65dvh; overflow-y: auto; background: #1c2029; border-top: 1px solid #333844; padding: 0.75rem; gap: 0.5rem; flex-wrap: wrap; justify-content: center; box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.65); }
       #controls-dock.more-open .secondary-controls { display: flex; }
@@ -321,6 +321,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     <div id="controls-dock">
       <div class="primary-controls">
         <div class="audio-switch" title="Switch audio mode"><button id="use-mic-btn" type="button">🎤 <span class="hide-sm">With </span>Mic</button><button id="use-speaker-btn" type="button">🔊 Speaker<span class="hide-sm"> Only</span></button></div>
+        <button id="mute-speaker-btn" class="secondary" type="button" title="Mute or unmute incoming speaker audio">🔊 <span class="hide-sm">Mute Speaker</span></button>
         <button id="cam-btn" class="secondary">📷 <span class="hide-sm">Enable </span>Cam</button>
         <button id="toggle-participants-btn" class="secondary">👥 <span class="hide-sm">Participants </span>(<span id="participants-btn-count">1</span>)<span id="joining-btn-badge" class="badge amber hidden">0</span></button>
         <button id="toggle-chat-btn" class="secondary">💬 <span class="hide-sm">Chat</span><span id="chat-total-badge" class="badge hidden">0</span></button>
@@ -431,6 +432,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const viewSwipeToast = document.getElementById("view-swipe-toast");
     const useMicBtn = document.getElementById("use-mic-btn");
     const useSpeakerBtn = document.getElementById("use-speaker-btn");
+    const muteSpeakerBtn = document.getElementById("mute-speaker-btn");
     const camBtn = document.getElementById("cam-btn");
     const snapshotBtn = document.getElementById("snapshot-btn");
     const wbToggleBtn = document.getElementById("wb-toggle-btn");
@@ -517,7 +519,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     let lkSpeakingIds = new Set(), localMicSpeaking = false, localHoldTimer = null, localVadCtx = null, localVadTimer = null, swipeToastTimer = null;
     let participantsRenderTimer = null, dmRefreshTimer = null;
 
-    let wantMicOnJoin = false, wantCamOnJoin = false, micEnabled = false, camEnabled = false;
+    let wantMicOnJoin = false, wantCamOnJoin = false, micEnabled = false, camEnabled = false, speakerMuted = false;
     let isSharingScreen = false, hasJoinedRoom = false, isHost = false;
     let requireScreenApproval = true, requireJoinApproval = false, autoRecordOnJoin = false, isMeetingRecording = false;
     let activeSharer = null, activeSharerName = null, screenRequestPending = false, screenShareApproved = false;
@@ -875,6 +877,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     viewModeSelect.onchange = () => { applyViewMode(viewModeSelect.value); controlsDock.classList.remove("more-open"); };
 
     function playChime(notes) {
+      if (speakerMuted) return;
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext; if (!AudioCtx) return;
         const ctx = new AudioCtx(); if (ctx.state === "suspended") ctx.resume().catch(() => {});
@@ -1655,10 +1658,13 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       await hideScreenStage(); updateControlButtons();
     }
 
+    function applySpeakerMuteState() {
+      audioContainer.querySelectorAll("audio").forEach((el) => { el.muted = speakerMuted; });
+    }
     function attachRemoteAudio(track) {
       if (!track || track.kind !== LivekitClient.Track.Kind.Audio) return;
       const elId = `audio-${track.sid}`; if (document.getElementById(elId)) return;
-      const audioEl = track.attach(); audioEl.id = elId; audioEl.autoplay = true; audioEl.playsInline = true; audioContainer.appendChild(audioEl);
+      const audioEl = track.attach(); audioEl.id = elId; audioEl.autoplay = true; audioEl.playsInline = true; audioEl.muted = speakerMuted; audioContainer.appendChild(audioEl);
       if (track.mediaStreamTrack) attachAudioTrackToRecorder(track.mediaStreamTrack);
       syncWhisperAudioTracks();
     }
@@ -1759,6 +1765,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     function updateControlButtons() {
       const strictHost = Boolean(isHost && currentHostId === clientId);
       useMicBtn.classList.toggle("selected-mic", micEnabled); useSpeakerBtn.classList.toggle("selected-speaker", !micEnabled);
+      muteSpeakerBtn.innerHTML = speakerMuted ? '🔇 <span class="hide-sm">Speaker Muted</span>' : '🔊 <span class="hide-sm">Mute Speaker</span>';
+      muteSpeakerBtn.classList.toggle("danger", speakerMuted);
+      muteSpeakerBtn.classList.toggle("secondary", !speakerMuted);
       camBtn.disabled = false; camBtn.innerHTML = camEnabled ? '📷 <span class="hide-sm">Disable </span>Cam<span class="hide-sm">era</span>' : '📷 <span class="hide-sm">Enable </span>Cam<span class="hide-sm">era</span>';
       camBtn.classList.toggle("active", camEnabled); camBtn.classList.toggle("secondary", !camEnabled);
       modalCamBtn.textContent = camEnabled ? "📷 Disable Camera" : "📷 Enable Camera"; modalCamBtn.classList.toggle("active", camEnabled); modalCamBtn.classList.toggle("secondary", !camEnabled);
@@ -1787,6 +1796,12 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     hostJoinPolicyBtn.onclick = () => { if (isHost) sendSignal({ type: "set_join_policy", require_approval: !requireJoinApproval }); };
     useMicBtn.onclick = async () => { await enableMicrophone(); };
     useSpeakerBtn.onclick = async () => { await useSpeakerOnly(); showNoticeBanner("🔊 Switched to Computer Speaker Only (microphone off).", "", 2500); };
+    muteSpeakerBtn.onclick = () => {
+      speakerMuted = !speakerMuted;
+      applySpeakerMuteState();
+      updateControlButtons();
+      showNoticeBanner(speakerMuted ? "🔇 Speaker muted (incoming audio silenced)." : "🔊 Speaker unmuted.", "", 2500);
+    };
     camBtn.onclick = async () => { if (camEnabled) await disableCamera(); else await enableCamera(); };
     modalCamBtn.onclick = async () => { if (camEnabled) await disableCamera(); else await enableCamera(); };
     modalMicBtn.onclick = async () => { await enableMicrophone(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); };
@@ -1814,7 +1829,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
     function enterMeetingScreen(roomId, title) {
       currentRoomId = roomId; currentMeetingTitle = title || `Room ${roomId}`;
-      isLeavingCall = false; wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; hasJoinedRoom = false;
+      isLeavingCall = false; wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; speakerMuted = false; hasJoinedRoom = false;
       waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null;
       pinnedTileId = null; lastActiveSpeakerTileId = null; lastSpeakingKey = ""; lkSpeakingIds.clear(); seenMsgIds.clear();
       wbOpen = false; wbLocked = false; wbHistory = []; redrawWhiteboard();
@@ -1931,7 +1946,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       peerNames = {}; peerAvatars = {}; waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null;
       pinnedTileId = null; lastActiveSpeakerTileId = null; lastSpeakingKey = ""; lkSpeakingIds.clear(); seenMsgIds.clear();
       wbOpen = false; wbLocked = false; wbHistory = []; redrawWhiteboard(); tileOrder = ["local"]; currentPage = 1;
-      wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; isSharingScreen = false; hasJoinedRoom = false;
+      wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; speakerMuted = false; isSharingScreen = false; hasJoinedRoom = false;
       isHost = false; autoRecordOnJoin = false; isMeetingRecording = false; requireJoinApproval = false; activeSharer = null; activeSharerName = null; screenRequestPending = false; screenShareApproved = false;
       audioContainer.innerHTML = ""; await hideScreenStage(); whiteboardStage.classList.add("hidden"); videoGrid.innerHTML = ""; reactionLayer.innerHTML = ""; bannerContainer.innerHTML = ""; publicMessages.innerHTML = ""; privateMessages.innerHTML = ""; participantSearch.value = "";
       controlsDock.classList.remove("more-open"); participantsPanel.classList.add("hidden");
