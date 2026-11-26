@@ -1118,7 +1118,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <!-- LOBBY & SCHEDULER -->
   <div id="lobby-view">
     <div class="lobby-header">
-      <h1>Fire-hub Video Conferencing</h1>
+      <h1>Video Conferencing (Up to 100 Users)</h1>
 
       <div class="profile-setup">
         <div id="profile-avatar-preview" class="avatar-circle">U</div>
@@ -1485,6 +1485,14 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       speaker: "🎤 Speaker View",
       sidebar: "◫ Sidebar View",
       compact: "🪪 Compact View"
+    };
+
+    const MIC_CONSTRAINTS = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1,
+      sampleRate: 48000
     };
 
     // Lobby Elements
@@ -2667,7 +2675,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         card.remove();
         renderParticipantsList();
       };
-      actions.querySelector(".deny-btn").onclick = () => {
+      actions.querySelector(".decline-btn").onclick = () => {
         delete waitingUsers[user.id];
         sendSignal({ type: "join_decision", target: user.id, approved: false });
         card.remove();
@@ -3389,7 +3397,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     });
 
     // --- Video Grid, Avatars, Pinning & Pagination ---
-    function ensureVideoTile(id, labelText, isMuted = false, avatarUrl = "") {
+    function ensureVideoTile(id, labelText, isMuted = true, avatarUrl = "") {
       let tile = document.getElementById(`tile-${id}`);
       const cleanName = labelText.replace(/\s*\(You\)$/, "");
       if (!tile) {
@@ -3400,7 +3408,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         const video = document.createElement("video");
         video.autoplay = true;
         video.playsInline = true;
-        video.muted = isMuted;
+        video.muted = true;
 
         const placeholder = document.createElement("div");
         placeholder.className = "placeholder";
@@ -3527,7 +3535,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       }
     }
 
-    // --- Microphone / Speaker Only ---
+    // --- Microphone / Speaker Only (Clear Voice, Echo Cancellation) ---
     async function enableMicrophone() {
       if (!(await checkDeviceExists("audioinput"))) {
         showNoticeBanner("❌ No microphone found on this device. Using Computer Speaker Only.", "denied");
@@ -3536,7 +3544,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
       if (!lkRoom) {
         try {
-          const testStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const testStream = await navigator.mediaDevices.getUserMedia({ audio: MIC_CONSTRAINTS });
           testStream.getTracks().forEach(t => t.stop());
           wantMicOnJoin = true;
           micEnabled = true;
@@ -3549,7 +3557,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       }
 
       try {
-        await lkRoom.localParticipant.setMicrophoneEnabled(true);
+        await lkRoom.localParticipant.setMicrophoneEnabled(true, MIC_CONSTRAINTS);
         micEnabled = true;
         const localMicPub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Microphone);
         if (localMicPub?.track?.mediaStreamTrack) {
@@ -3578,7 +3586,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       updateControlButtons();
     }
 
-    // --- Camera Enable / Disable ---
+    // --- Camera Enable / Disable (Full 1080p HD Capture) ---
     async function enableCamera() {
       if (!(await checkDeviceExists("videoinput"))) {
         showNoticeBanner("❌ No camera found on this device.", "denied", 5000);
@@ -3587,7 +3595,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
       if (!lkRoom) {
         try {
-          const testStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const testStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }
+          });
           const tile = ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar);
           tile.querySelector("video").srcObject = testStream;
           setTilePlaceholder("local", true, "Camera Disabled");
@@ -3602,7 +3612,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       }
 
       try {
-        await lkRoom.localParticipant.setCameraEnabled(true);
+        await lkRoom.localParticipant.setCameraEnabled(true, {
+          resolution: LivekitClient.VideoPresets.h1080.resolution
+        });
         camEnabled = true;
         const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera);
         const localVideo = ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video");
@@ -3722,6 +3734,19 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       updateControlButtons();
     }
 
+    // --- Deduplicated Remote Audio Attachment (Prevents Double Audio / Echo) ---
+    function attachRemoteAudio(track) {
+      if (!track || track.kind !== LivekitClient.Track.Kind.Audio) return;
+      const elId = `audio-${track.sid}`;
+      if (document.getElementById(elId)) return;
+      const audioEl = track.attach();
+      audioEl.id = elId;
+      audioEl.autoplay = true;
+      audioEl.playsInline = true;
+      audioContainer.appendChild(audioEl);
+      if (track.mediaStreamTrack) attachAudioTrackToRecorder(track.mediaStreamTrack);
+    }
+
     // --- LiveKit SFU Connection ---
     async function connectLiveKit(url, token) {
       if (typeof LivekitClient === "undefined") {
@@ -3730,12 +3755,22 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       }
 
       lkRoom = new LivekitClient.Room({
-        adaptiveStream: true,
+        adaptiveStream: false,
         dynacast: true,
+        audioCaptureDefaults: MIC_CONSTRAINTS,
         videoCaptureDefaults: {
-          resolution: LivekitClient.VideoPresets.h720.resolution
+          resolution: LivekitClient.VideoPresets.h1080.resolution
         },
         publishDefaults: {
+          audioPreset: LivekitClient.AudioPresets.speech,
+          dtx: true,
+          red: true,
+          simulcast: true,
+          videoEncoding: LivekitClient.VideoPresets.h1080.encoding,
+          videoSimulcastLayers: [
+            LivekitClient.VideoPresets.h720,
+            LivekitClient.VideoPresets.h360
+          ],
           screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30 },
           degradationPreference: "maintain-resolution"
         }
@@ -3755,15 +3790,13 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         const pAvatar = peerAvatars[pid] || "";
 
         if (track.kind === LivekitClient.Track.Kind.Audio) {
-          const audioEl = track.attach();
-          audioEl.id = `audio-${track.sid}`;
-          audioContainer.appendChild(audioEl);
-          if (track.mediaStreamTrack) attachAudioTrackToRecorder(track.mediaStreamTrack);
+          attachRemoteAudio(track);
         } else if (publication.source === LivekitClient.Track.Source.ScreenShare) {
           showRemoteScreenStage(pName, track, publication);
         } else if (publication.source === LivekitClient.Track.Source.Camera) {
-          const tile = ensureVideoTile(pid, pName, false, pAvatar);
+          const tile = ensureVideoTile(pid, pName, true, pAvatar);
           track.attach(tile.querySelector("video"));
+          try { publication.setVideoQuality?.(LivekitClient.VideoQuality.HIGH); } catch {}
           setTilePlaceholder(pid, !publication.isMuted, "Camera Off");
         }
         renderParticipantsList();
@@ -3772,6 +3805,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       lkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, async (track, publication, participant) => {
         if (track.kind === LivekitClient.Track.Kind.Audio) {
           track.detach().forEach(el => el.remove());
+          const existingAudio = document.getElementById(`audio-${track.sid}`);
+          if (existingAudio) existingAudio.remove();
         } else if (publication.source === LivekitClient.Track.Source.ScreenShare) {
           track.detach(screenStageVideo);
           await hideScreenStage();
@@ -3854,18 +3889,17 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         const pid = participant.identity;
         const pName = participant.name || peerNames[pid] || `User ${pid}`;
         const pAvatar = peerAvatars[pid] || "";
-        ensureVideoTile(pid, pName, false, pAvatar);
+        ensureVideoTile(pid, pName, true, pAvatar);
         for (const pub of participant.trackPublications.values()) {
           if (pub.isSubscribed && pub.track) {
             if (pub.track.kind === LivekitClient.Track.Kind.Audio) {
-              const el = pub.track.attach();
-              el.id = `audio-${pub.track.sid}`;
-              audioContainer.appendChild(el);
+              attachRemoteAudio(pub.track);
             } else if (pub.source === LivekitClient.Track.Source.ScreenShare) {
               showRemoteScreenStage(pName, pub.track, pub);
             } else if (pub.source === LivekitClient.Track.Source.Camera) {
-              const tile = ensureVideoTile(pid, pName, false, pAvatar);
+              const tile = ensureVideoTile(pid, pName, true, pAvatar);
               pub.track.attach(tile.querySelector("video"));
+              try { pub.setVideoQuality?.(LivekitClient.VideoQuality.HIGH); } catch {}
               setTilePlaceholder(pid, !pub.isMuted, "Camera Off");
             }
           }
@@ -4172,7 +4206,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
           for (const user of msg.users) {
             peerNames[user.id] = user.name;
             peerAvatars[user.id] = user.avatar || "";
-            ensureVideoTile(user.id, user.name, false, user.avatar || "");
+            ensureVideoTile(user.id, user.name, true, user.avatar || "");
           }
           refreshDmDropdown();
           updateControlButtons();
@@ -4269,7 +4303,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         } else if (msg.type === "user_joined") {
           peerNames[msg.user.id] = msg.user.name;
           peerAvatars[msg.user.id] = msg.user.avatar || "";
-          ensureVideoTile(msg.user.id, msg.user.name, false, msg.user.avatar || "");
+          ensureVideoTile(msg.user.id, msg.user.name, true, msg.user.avatar || "");
           refreshDmDropdown();
           playJoinSound();
           showNoticeBanner(`👋 ${msg.user.name} joined the meeting.`, "", 2800);
