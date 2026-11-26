@@ -231,12 +231,14 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       .call-title { font-size: 0.92rem; gap: 0.35rem; }
       .call-sub { display: none; }
       .header-actions button { padding: 0.4rem 0.65rem; font-size: 0.8rem; }
-      #controls-dock { order: 4; border-bottom: none; border-top: 1px solid #2b303b; padding: 0.45rem 0.55rem calc(0.45rem + env(safe-area-inset-bottom)); justify-content: center; }
-      .primary-controls { width: 100%; justify-content: space-between; gap: 0.35rem; flex-wrap: nowrap; }
-      .primary-controls .audio-switch { flex: 1.4; justify-content: center; }
-      .primary-controls .audio-switch button { flex: 1; padding: 0.5rem 0.35rem; font-size: 0.78rem; }
-      .primary-controls > button { flex: 1; padding: 0.52rem 0.4rem; font-size: 0.78rem; }
-      .secondary-controls { display: none; position: absolute; bottom: 100%; left: 0; right: 0; background: #1c2029; border-top: 1px solid #333844; padding: 0.75rem; gap: 0.5rem; flex-wrap: wrap; justify-content: center; box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55); }
+      #controls-dock { order: 4; z-index: 49; border-bottom: none; border-top: 1px solid #2b303b; padding: 0.45rem 0.55rem calc(0.45rem + env(safe-area-inset-bottom)); justify-content: center; }
+      .primary-controls { width: 100%; justify-content: space-between; gap: 0.3rem; flex-wrap: nowrap; }
+      .primary-controls .audio-switch { flex: 1.3; justify-content: center; }
+      .primary-controls .audio-switch button { flex: 1; padding: 0.5rem 0.3rem; font-size: 0.76rem; }
+      .primary-controls > button { flex: 1; padding: 0.52rem 0.35rem; font-size: 0.76rem; }
+      #mobile-more-btn { flex: 0 0 auto; white-space: nowrap; padding: 0.52rem 0.6rem; }
+      #controls-dock.more-open #mobile-more-btn { background: #16a34a; }
+      .secondary-controls { display: none; position: fixed; bottom: 60px; left: 0; right: 0; z-index: 48; max-height: 65dvh; overflow-y: auto; background: #1c2029; border-top: 1px solid #333844; padding: 0.75rem; gap: 0.5rem; flex-wrap: wrap; justify-content: center; box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.65); }
       #controls-dock.more-open .secondary-controls { display: flex; }
       .secondary-controls button, .secondary-controls select { flex: 1 1 44%; font-size: 0.84rem; padding: 0.55rem 0.65rem; }
       #video-grid { padding: 0.5rem; }
@@ -327,7 +329,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       <div class="secondary-controls">
         <select id="view-mode-select" title="Switch Meeting View"><option value="grid">📐 Grid View</option><option value="speaker">🎤 Speaker View</option><option value="sidebar">◫ Sidebar View</option><option value="compact">🪪 Compact View</option></select>
         <select id="quality-mode-select" title="Video Quality & Smoothness"><option value="auto">🎥 Auto HD (Smooth)</option><option value="saver">📶 Data Saver (360p)</option></select>
-        <button id="snapshot-btn" class="secondary" title="Take full screenshot of meeting">📸 Snapshot</button>
+        <button id="snapshot-btn" class="secondary" title="Take clean snapshot of video stage">📸 Snapshot</button>
         <button id="wb-toggle-btn" class="secondary">🎨 Whiteboard</button>
         <button id="screen-btn" class="secondary">Share Screen</button>
         <button id="cc-btn" class="secondary">💬 CC: Off</button>
@@ -535,7 +537,13 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     let activeChatTab = "public", unreadPublic = 0, unreadPrivate = 0, localAvatar = localStorage.getItem("vc_avatar") || "";
 
     if (window.innerWidth > 768) chatPanel.classList.remove("hidden");
-    mobileMoreBtn.onclick = (e) => { e.stopPropagation(); controlsDock.classList.toggle("more-open"); };
+    const secondaryControlsEl = document.querySelector(".secondary-controls");
+    mobileMoreBtn.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const willOpen = !controlsDock.classList.contains("more-open");
+      if (willOpen && secondaryControlsEl) secondaryControlsEl.style.bottom = `${controlsDock.offsetHeight}px`;
+      controlsDock.classList.toggle("more-open", willOpen);
+    };
     document.addEventListener("click", (e) => { if (!controlsDock.contains(e.target)) controlsDock.classList.remove("more-open"); });
 
     async function checkOwnerAccess() {
@@ -606,7 +614,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     }
 
     async function takeStageScreenshot() {
-      const target = document.getElementById("call-view");
+      const target = document.getElementById("stage");
       const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       const filename = `meeting-snapshot-${currentRoomId || "meeting"}-${stamp}.png`;
 
@@ -632,8 +640,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             useCORS: true,
             logging: false,
             onclone: (clonedDoc) => {
-              const banners = clonedDoc.getElementById("banner-container");
-              if (banners) banners.style.display = "none";
+              ["mobile-view-bar", "stage-footer", "caption-bar", "view-swipe-toast", "reaction-layer"].forEach((id) => {
+                const el = clonedDoc.getElementById(id); if (el) el.style.display = "none";
+              });
+              clonedDoc.querySelectorAll(".tile-actions").forEach((el) => { el.style.display = "none"; });
               clonedDoc.querySelectorAll("video[data-snap-idx]").forEach((clonedVid) => {
                 const c = videoCanvases.get(clonedVid.dataset.snapIdx);
                 if (c && clonedVid.parentNode) {
