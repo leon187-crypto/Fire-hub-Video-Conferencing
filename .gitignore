@@ -1,0 +1,6 @@
+﻿meetings.db
+recordings/
+__pycache__/
+*.pyc
+.env
+venv/
