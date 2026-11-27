@@ -43,7 +43,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
-  <title>Python LiveKit Video Conference (100 Users)</title>
+  <title>Fire-Hub Video Conference</title>
   <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/yusitnikov/fix-webm-duration/fix-webm-duration.js"></script>
   <style>
@@ -363,7 +363,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 <body>
   <div id="lobby-view">
     <div class="lobby-header">
-      <h1>Video Conferencing (Up to 100 Users)</h1>
+      <h1>Fire-Hub Video Conferencing</h1>
       <div class="profile-setup">
         <div id="profile-avatar-preview" class="avatar-circle">U</div>
         <div style="flex: 1; min-width: 140px;"><label for="name-input" style="margin-bottom: 2px;">Your Display Name</label><input id="name-input" type="text" placeholder="Enter your name" style="padding: 0.45rem 0.65rem;" /></div>
@@ -465,7 +465,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         <div id="caption-bar" class="hidden"><span id="caption-speaker"></span><span id="caption-text">Auto Captions Enabled (listening...)</span></div>
         <div id="stage-footer">
           <div id="pagination-bar" class="hidden"><button id="prev-page-btn" class="secondary">◀ Prev</button><span id="page-indicator">Page 1 / 1</span><button id="next-page-btn" class="secondary">Next ▶</button></div>
-          <div id="reaction-bar"><button class="react-btn" data-emoji="👍">👍</button><button class="react-btn" data-emoji="❤️">❤️</button><button class="react-btn" data-emoji="😂">😂</button><button class="react-btn" data-emoji="👏">👏</button><button class="react-btn" data-emoji="🎉">🎉</button><button class="react-btn" data-emoji="😮">😮</button></div>
+          <div id="reaction-bar"><button class="react-btn" data-emoji="🙏">🙏<button class="react-btn" data-emoji="👍">👍</button><button class="react-btn" data-emoji="❤️">❤️</button><button class="react-btn" data-emoji="😂">😂</button><button class="react-btn" data-emoji="👏">👏</button><button class="react-btn" data-emoji="🎉">🎉</button><button class="react-btn" data-emoji="😮">😮</button></div>
         </div>
       </div>
       <aside id="participants-panel" class="side-panel hidden"><div class="panel-header"><span id="participants-panel-title">Participants (1)</span><button id="close-participants-btn" class="secondary" style="padding: 0.25rem 0.55rem;">✕</button></div><div style="padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border);"><input id="participant-search" type="text" placeholder="Search participants..." style="padding: 0.45rem 0.65rem;" /></div><div id="participants-list" class="panel-scroll"></div></aside>
