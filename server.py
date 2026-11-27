@@ -876,10 +876,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     function formatDurationLabel(mins) {
       const m = Number(mins || 0);
       if (!m || m <= 0) return "Unlimited";
-      if (m >= 60 && m %
-      function formatDurationLabel(mins) {
-      const m = Number(mins || 0);
-      if (!m || m <= 0) return "Unlimited";
       if (m >= 60 && m % 60 === 0) return `${m / 60} hr`;
       if (m > 60) return `${Math.floor(m / 60)}h ${m % 60}m`;
       return `${m} min`;
