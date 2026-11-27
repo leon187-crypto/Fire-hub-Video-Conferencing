@@ -379,7 +379,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
   <div id="call-view" class="hidden">
     <div id="banner-container"></div>
-    <video id="pip-video" autoplay playsinline style="position:fixed;width:16px;height:16px;opacity:0.001;pointer-events:none;bottom:0;right:0;z-index:-1;"></video>
+    <video id="pip-video" autoplay playsinline muted style="position:fixed;width:16px;height:16px;opacity:0.001;pointer-events:none;bottom:0;right:0;z-index:-1;"></video>
     <header id="call-header">
       <div class="call-info">
         <span class="call-title"><span id="call-title-text">Meeting</span><span id="host-badge" class="host-pill hidden">Host</span><span id="participant-count" class="count-pill">👥 1 / 100</span><span id="timer-pill" class="timer-pill hidden">⏱️ 00:00</span><button id="extend-time-btn" class="secondary hidden" type="button" style="padding: 2px 7px; font-size: 0.72rem;" title="Extend meeting by 15 minutes">+15m</button><span id="joining-count-pill" class="joining-pill hidden">⏳ 0</span><span id="recording-pill" class="rec-pill hidden">● REC</span></span>
@@ -398,7 +398,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       </div>
       <div class="secondary-controls">
         <select id="view-mode-select" title="Switch Meeting View"><option value="grid">📐 Grid View</option><option value="speaker">🎤 Speaker View</option><option value="sidebar">◫ Sidebar View</option><option value="compact">🪪 Compact View</option></select>
-        <select id="quality-mode-select" title="Video Quality & Smoothness"><option value="auto">🎥 Auto HD (Smooth)</option><option value="hd">🌟 Full HD (1080p)</option><option value="saver">📶 Data Saver (360p)</option></select>
+        <select id="quality-mode-select" title="Video Quality & Smoothness"><option value="auto">🎥 Auto HD (Smooth)</option><option value="hd">🌟 Full HD (1080p Real-Time)</option><option value="saver">📶 Data Saver (360p)</option></select>
         <select id="call-theme-select" title="Appearance Mode"><option value="dark">🌙 Night</option><option value="system">🌓 System</option><option value="light">☀️ Light</option></select>
         <button id="wake-lock-btn" class="secondary" type="button" title="Keep phone screen awake even when camera is off">🔆 Awake: On</button>
         <button id="pip-btn" class="secondary" type="button" title="Open floating mini window (Picture-in-Picture)">🪟 Float Screen</button>
@@ -445,7 +445,15 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <script>
     const VIEW_MODES = ["grid", "speaker", "sidebar", "compact"];
     const VIEW_LABELS = { grid: "📐 Grid View", speaker: "🎤 Speaker View", sidebar: "◫ Sidebar View", compact: "🪪 Compact View" };
-    const MIC_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: 48000 };
+    const MIC_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: 48000, latency: 0.01 };
+    const CAM_PUBLISH_DEFAULTS = {
+      videoCodec: "vp8",
+      backupCodec: false,
+      videoEncoding: { maxBitrate: 2_500_000, maxFramerate: 30, priority: "high" },
+      simulcast: true,
+      videoSimulcastLayers: [LivekitClient.VideoPresets.h720, LivekitClient.VideoPresets.h360],
+      degradationPreference: "maintain-framerate"
+    };
 
     const lobbyView = document.getElementById("lobby-view");
     const lobbyHomeSections = document.getElementById("lobby-home-sections");
@@ -590,10 +598,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     let waitingCount = 0, currentHostId = null, tileOrder = ["local"], currentPage = 1, tileReactionTimers = {};
     const seenMsgIds = new Set();
 
-    let meetingEndsAtMs = null, serverTimeOffsetMs = 0, countdownTimer = null;
+    let meetingEndsAtMs = null, serverTimeOffsetMs = 0, countdownTimer = null, realtimeSyncTimer = null;
     let themeMode = localStorage.getItem("vc_theme") || "dark";
     let keepAwakeEnabled = localStorage.getItem("vc_keep_awake") !== "0";
-    let wakeLockSentinel = null, bgKeepaliveCtx = null, bgKeepaliveAudio = null, bgKeepaliveStream = null;
+    let wakeLockSentinel = null, bgKeepaliveCtx = null, bgKeepaliveAudio = null, bgKeepaliveStream = null, uiSoundCtx = null;
     let pipCanvas = null, pipWorker = null, pipWorkerUrl = null, pipDrawTimer = null, pipStream = null, isPipActive = false;
 
     let currentViewMode = localStorage.getItem("vc_view_mode") || "grid";
@@ -601,6 +609,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     let pinnedTileId = null, lastActiveSpeakerTileId = null, lastSpeakerSwitchAt = 0, lastSpeakingKey = "";
     let lkSpeakingIds = new Set(), localMicSpeaking = false, localHoldTimer = null, localVadCtx = null, localVadTimer = null, swipeToastTimer = null;
     let participantsRenderTimer = null, dmRefreshTimer = null;
+    const appliedTrackQuality = new Map();
 
     let wantMicOnJoin = false, wantCamOnJoin = false, micEnabled = false, camEnabled = false, speakerMuted = false;
     let isSharingScreen = false, hasJoinedRoom = false, isHost = false;
@@ -689,6 +698,42 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     if (systemLightMq?.addEventListener) systemLightMq.addEventListener("change", () => { if (themeMode === "system") applyTheme("system"); });
     applyTheme(themeMode);
 
+    function unlockUiAudio() {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return null;
+        if (!uiSoundCtx || uiSoundCtx.state === "closed") uiSoundCtx = new AudioCtx({ latencyHint: "interactive" });
+        if (uiSoundCtx.state === "suspended") uiSoundCtx.resume().catch(() => {});
+        return uiSoundCtx;
+      } catch { return null; }
+    }
+    window.addEventListener("pointerdown", unlockUiAudio, { passive: true });
+    window.addEventListener("keydown", unlockUiAudio, { passive: true });
+
+    function tuneLowLatencyTrack(track) {
+      if (!track) return;
+      try { track.setPlayoutDelay?.(0); } catch {}
+      try {
+        const r = track.receiver;
+        if (r) {
+          if ("playoutDelayHint" in r) r.playoutDelayHint = 0;
+          if ("jitterBufferTarget" in r) r.jitterBufferTarget = 0;
+        }
+      } catch {}
+    }
+
+    function enforceRealtimeMediaSync() {
+      if (!lkRoom || lkRoom.state !== "connected") return;
+      for (const p of lkRoom.remoteParticipants.values()) {
+        for (const pub of p.trackPublications.values()) {
+          if (pub.isSubscribed && pub.track) tuneLowLatencyTrack(pub.track);
+        }
+      }
+      if (!speakerMuted) {
+        audioContainer.querySelectorAll("audio").forEach((a) => { if (a.paused) a.play().catch(() => {}); });
+      }
+    }
+
     async function requestWakeLock() {
       if (!keepAwakeEnabled || !hasJoinedRoom || isLeavingCall || !("wakeLock" in navigator)) return;
       try {
@@ -716,10 +761,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     };
 
     function startBackgroundKeepalive() {
+      unlockUiAudio();
       if (!bgKeepaliveAudio) {
         try {
           const AudioCtx = window.AudioContext || window.webkitAudioContext;
-          bgKeepaliveCtx = new AudioCtx();
+          bgKeepaliveCtx = new AudioCtx({ latencyHint: "interactive" });
           if (bgKeepaliveCtx.state === "suspended") bgKeepaliveCtx.resume().catch(() => {});
           const dest = bgKeepaliveCtx.createMediaStreamDestination();
           const osc = bgKeepaliveCtx.createOscillator(), gain = bgKeepaliveCtx.createGain();
@@ -755,7 +801,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         navigator.mediaSession.setActionHandler("play", () => {
           if (bgKeepaliveCtx?.state === "suspended") bgKeepaliveCtx.resume().catch(() => {});
           bgKeepaliveAudio?.play?.().catch(() => {});
-          audioContainer.querySelectorAll("audio").forEach(a => a.play().catch(() => {}));
+          if (!speakerMuted) audioContainer.querySelectorAll("audio").forEach(a => a.play().catch(() => {}));
           if (pipVideo?.srcObject && pipVideo.paused) pipVideo.play().catch(() => {});
         });
         navigator.mediaSession.setActionHandler("pause", () => {});
@@ -813,11 +859,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (!pipCanvas) { pipCanvas = document.createElement("canvas"); pipCanvas.width = 640; pipCanvas.height = 360; }
       drawPipFrame();
       if (!pipStream) {
-        const tracks = [...pipCanvas.captureStream(15).getVideoTracks()];
-        if (bgKeepaliveStream) tracks.push(...bgKeepaliveStream.getAudioTracks());
-        pipStream = new MediaStream(tracks);
-        pipVideo.muted = !bgKeepaliveStream;
-        pipVideo.volume = 0.01;
+        pipStream = new MediaStream(pipCanvas.captureStream(15).getVideoTracks());
+        pipVideo.muted = true;
         pipVideo.srcObject = pipStream;
         pipVideo.autoPictureInPicture = true;
       }
@@ -872,10 +915,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         if (hasJoinedRoom && keepAwakeEnabled) requestWakeLock();
         if (bgKeepaliveCtx?.state === "suspended") bgKeepaliveCtx.resume().catch(() => {});
         if (recAudioCtx?.state === "suspended") recAudioCtx.resume().catch(() => {});
+        enforceRealtimeMediaSync();
       } else if (hasJoinedRoom) {
         updateMediaSession();
         if (bgKeepaliveCtx?.state === "suspended") bgKeepaliveCtx.resume().catch(() => {});
-        audioContainer.querySelectorAll("audio").forEach((a) => { if (a.paused) a.play().catch(() => {}); });
+        if (!speakerMuted) audioContainer.querySelectorAll("audio").forEach((a) => { if (a.paused) a.play().catch(() => {}); });
       }
     });
 
@@ -1090,18 +1134,18 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     function startLocalVoiceMonitor(mediaStreamTrack) {
       stopLocalVoiceMonitor(); if (!mediaStreamTrack) return;
       try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext; localVadCtx = new AudioCtx();
+        const AudioCtx = window.AudioContext || window.webkitAudioContext; localVadCtx = new AudioCtx({ latencyHint: "interactive" });
         if (localVadCtx.state === "suspended") localVadCtx.resume().catch(() => {});
         const src = localVadCtx.createMediaStreamSource(new MediaStream([mediaStreamTrack]));
-        const analyser = localVadCtx.createAnalyser(); analyser.fftSize = 256; src.connect(analyser);
+        const analyser = localVadCtx.createAnalyser(); analyser.fftSize = 128; src.connect(analyser);
         const data = new Uint8Array(analyser.frequencyBinCount);
         localVadTimer = setInterval(() => {
           if (!micEnabled) { if (localMicSpeaking) { localMicSpeaking = false; updateSpeakingUI(); } return; }
           analyser.getByteFrequencyData(data);
           let sum = 0; for (let i = 0; i < data.length; i++) sum += data[i];
-          if (sum / data.length > 12) { clearTimeout(localHoldTimer); localHoldTimer = null; if (!localMicSpeaking) { localMicSpeaking = true; updateSpeakingUI(); } }
-          else if (localMicSpeaking && !localHoldTimer) { localHoldTimer = setTimeout(() => { localHoldTimer = null; localMicSpeaking = false; updateSpeakingUI(); }, 450); }
-        }, 150);
+          if (sum / data.length > 11) { clearTimeout(localHoldTimer); localHoldTimer = null; if (!localMicSpeaking) { localMicSpeaking = true; updateSpeakingUI(); } }
+          else if (localMicSpeaking && !localHoldTimer) { localHoldTimer = setTimeout(() => { localHoldTimer = null; localMicSpeaking = false; updateSpeakingUI(); }, 240); }
+        }, 50);
       } catch {}
     }
     function stopLocalVoiceMonitor() {
@@ -1126,17 +1170,41 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       }
       if ((currentViewMode === "speaker" || currentViewMode === "sidebar") && !pinnedTileId) {
         const now = Date.now();
-        if (now - lastSpeakerSwitchAt > 1200) { lastSpeakerSwitchAt = now; updateFeaturedTile(); }
+        if (now - lastSpeakerSwitchAt > 700) { lastSpeakerSwitchAt = now; updateFeaturedTile(); }
       }
     }
 
     function applyQualityMode(mode) {
       qualityMode = ["saver", "hd", "auto"].includes(mode) ? mode : "auto"; qualityModeSelect.value = qualityMode;
       try { localStorage.setItem("vc_quality_mode", qualityMode); } catch {}
+      appliedTrackQuality.clear();
       applySubscriptionEfficiency();
     }
     qualityModeSelect.value = qualityMode;
     qualityModeSelect.onchange = () => { applyQualityMode(qualityModeSelect.value); controlsDock.classList.remove("more-open"); };
+
+    function getTargetVideoQuality(isFeatured) {
+      if (qualityMode === "saver") return LivekitClient.VideoQuality.LOW;
+      if (qualityMode === "hd" || isFeatured || tileOrder.length <= 9) return LivekitClient.VideoQuality.HIGH;
+      return LivekitClient.VideoQuality.MEDIUM;
+    }
+
+    function applyPublicationQuality(pub, isVisible, isFeatured) {
+      if (!pub || pub.source !== LivekitClient.Track.Source.Camera) return;
+      const targetQ = getTargetVideoQuality(isFeatured);
+      const cacheKey = `${isVisible ? 1 : 0}:${targetQ}`;
+      if (pub.trackSid && appliedTrackQuality.get(pub.trackSid) === cacheKey) return;
+      if (pub.trackSid) appliedTrackQuality.set(pub.trackSid, cacheKey);
+      try {
+        pub.setEnabled?.(isVisible);
+        if (isVisible) {
+          pub.setVideoQuality?.(targetQ);
+          if (targetQ === LivekitClient.VideoQuality.HIGH) pub.setVideoDimensions?.({ width: 1920, height: 1080 });
+          else if (targetQ === LivekitClient.VideoQuality.MEDIUM) pub.setVideoDimensions?.({ width: 1280, height: 720 });
+          else pub.setVideoDimensions?.({ width: 640, height: 360 });
+        }
+      } catch {}
+    }
 
     function applySubscriptionEfficiency() {
       if (!lkRoom) return;
@@ -1146,21 +1214,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         const pid = participant.identity, isVisible = visibleIds.has(pid);
         const isFeatured = Boolean(document.getElementById(`tile-${pid}`)?.classList.contains("featured-tile"));
         for (const pub of participant.trackPublications.values()) {
-          if (pub.source === LivekitClient.Track.Source.Camera) {
-            try {
-              pub.setEnabled?.(isVisible);
-              if (isVisible) {
-                if (qualityMode === "saver") {
-                  pub.setVideoQuality?.(LivekitClient.VideoQuality.LOW);
-                } else if (qualityMode === "hd" || isFeatured || tileOrder.length <= 9) {
-                  pub.setVideoQuality?.(LivekitClient.VideoQuality.HIGH);
-                  pub.setVideoDimensions?.({ width: 1920, height: 1080 });
-                } else {
-                  pub.setVideoQuality?.(LivekitClient.VideoQuality.MEDIUM);
-                }
-              }
-            } catch {}
-          }
+          if (pub.source === LivekitClient.Track.Source.Camera) applyPublicationQuality(pub, isVisible, isFeatured);
         }
       }
     }
@@ -1226,16 +1280,21 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     function playChime(notes) {
       if (speakerMuted) return;
       try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext; if (!AudioCtx) return;
-        const ctx = new AudioCtx(); if (ctx.state === "suspended") ctx.resume().catch(() => {});
-        const now = ctx.currentTime;
-        notes.forEach(([freq, dur], idx) => {
-          const osc = ctx.createOscillator(), gain = ctx.createGain();
-          osc.type = "sine"; osc.frequency.setValueAtTime(freq, now + idx * 0.11);
-          gain.gain.setValueAtTime(0.001, now + idx * 0.11); gain.gain.exponentialRampToValueAtTime(0.14, now + idx * 0.11 + 0.02); gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.11 + dur);
-          osc.connect(gain); gain.connect(ctx.destination); osc.start(now + idx * 0.11); osc.stop(now + idx * 0.11 + dur + 0.02);
-        });
-        setTimeout(() => ctx.close().catch(() => {}), 800);
+        const ctx = unlockUiAudio(); if (!ctx) return;
+        const schedule = () => {
+          const now = ctx.currentTime + 0.005;
+          notes.forEach(([freq, dur], idx) => {
+            const osc = ctx.createOscillator(), gain = ctx.createGain();
+            osc.type = "sine"; osc.frequency.setValueAtTime(freq, now + idx * 0.11);
+            gain.gain.setValueAtTime(0.001, now + idx * 0.11);
+            gain.gain.exponentialRampToValueAtTime(0.14, now + idx * 0.11 + 0.015);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.11 + dur);
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.start(now + idx * 0.11); osc.stop(now + idx * 0.11 + dur + 0.02);
+          });
+        };
+        if (ctx.state === "suspended") ctx.resume().then(schedule).catch(() => {});
+        else schedule();
       } catch {}
     }
     function playJoinSound() { playChime([[523.25, 0.16], [659.25, 0.24]]); }
@@ -1521,7 +1580,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       try {
         recCanvas = document.createElement("canvas"); recCanvas.width = 1280; recCanvas.height = 720;
         const ctx = recCanvas.getContext("2d", { alpha: false, desynchronized: true });
-        recAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        recAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
         if (recAudioCtx.state === "suspended") await recAudioCtx.resume();
         recAudioDest = recAudioCtx.createMediaStreamDestination();
         recSilentOsc = recAudioCtx.createOscillator();
@@ -1962,17 +2021,20 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     async function enableCamera() {
       if (!(await checkDeviceExists("videoinput"))) { showNoticeBanner("❌ No camera found on this device.", "denied", 5000); return false; }
       if (!lkRoom) {
-        try { const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } } }); ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video").srcObject = s; setTilePlaceholder("local", true, "Camera Disabled"); wantCamOnJoin = true; camEnabled = true; updateControlButtons(); return true; }
+        try { const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, min: 24 } } }); ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video").srcObject = s; setTilePlaceholder("local", true, "Camera Disabled"); wantCamOnJoin = true; camEnabled = true; updateControlButtons(); return true; }
         catch (err) { handleMediaError(err, "camera"); return false; }
       }
       try {
         await lkRoom.localParticipant.setCameraEnabled(
           true,
-          { resolution: LivekitClient.VideoPresets.h1080.resolution, facingMode: "user" },
-          { videoEncoding: { maxBitrate: 4_500_000, maxFramerate: 30 }, simulcast: true, videoSimulcastLayers: [LivekitClient.VideoPresets.h360], degradationPreference: "maintain-resolution" }
+          { resolution: LivekitClient.VideoPresets.h1080.resolution, frameRate: 30, facingMode: "user" },
+          CAM_PUBLISH_DEFAULTS
         ); camEnabled = true;
         const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera), lv = ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video");
-        if (pub?.track) pub.track.attach(lv);
+        if (pub?.track) {
+          if (pub.track.mediaStreamTrack) pub.track.mediaStreamTrack.contentHint = "motion";
+          pub.track.attach(lv);
+        }
         setTilePlaceholder("local", true, "Camera Disabled"); updateControlButtons(); return true;
       } catch (err) { handleMediaError(err, "camera"); camEnabled = false; updateControlButtons(); return false; }
     }
@@ -1986,6 +2048,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
     function showRemoteScreenStage(presenterName, track, publication) {
       activeScreenPublication = publication || null;
+      tuneLowLatencyTrack(track);
       screenStage.classList.remove("hidden"); screenStageVideo.classList.remove("hidden"); screenFullscreenBtn.classList.remove("hidden");
       onFullscreenChange(); screenStageLabel.textContent = `🖥️ ${presenterName} is presenting (1080p HD)`;
       track.attach(screenStageVideo); applyHighQualityScreenShare();
@@ -1998,7 +2061,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     async function launchDisplayMedia() {
       if (!lkRoom) return;
       const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      try { await lkRoom.localParticipant.setScreenShareEnabled(true, { audio: false, selfBrowserSurface: "exclude", contentHint: "detail", ...(isSafari ? {} : { resolution: LivekitClient.ScreenSharePresets.h1080fps30.resolution }) }, { screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30 }, simulcast: false, degradationPreference: "maintain-resolution" }); }
+      try { await lkRoom.localParticipant.setScreenShareEnabled(true, { audio: false, selfBrowserSurface: "exclude", contentHint: "detail", ...(isSafari ? {} : { resolution: LivekitClient.ScreenSharePresets.h1080fps30.resolution }) }, { screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30, priority: "high" }, simulcast: false, degradationPreference: "maintain-resolution" }); }
       catch { return; }
       isSharingScreen = true; screenShareApproved = false; screenRequestPending = false; sendSignal({ type: "screen_share_started" });
       const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.ScreenShare);
@@ -2018,26 +2081,31 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     }
     function attachRemoteAudio(track) {
       if (!track || track.kind !== LivekitClient.Track.Kind.Audio) return;
+      tuneLowLatencyTrack(track);
       const elId = `audio-${track.sid}`; if (document.getElementById(elId)) return;
-      const audioEl = track.attach(); audioEl.id = elId; audioEl.autoplay = true; audioEl.playsInline = true; audioEl.muted = speakerMuted; audioContainer.appendChild(audioEl);
+      const audioEl = track.attach(); audioEl.id = elId; audioEl.autoplay = true; audioEl.playsInline = true; audioEl.muted = speakerMuted;
+      audioContainer.appendChild(audioEl);
+      if (!speakerMuted) audioEl.play().catch(() => {});
       if (track.mediaStreamTrack) attachAudioTrackToRecorder(track.mediaStreamTrack);
       syncWhisperAudioTracks();
     }
     async function connectLiveKit(url, token) {
       if (typeof LivekitClient === "undefined") { showNoticeBanner("❌ LiveKit client script failed to load.", "denied", 0); return; }
       if (lkRoom) { try { await lkRoom.disconnect(); } catch {} lkRoom = null; }
+      appliedTrackQuality.clear();
+      clearInterval(realtimeSyncTimer); realtimeSyncTimer = null;
 
       lkRoom = new LivekitClient.Room({
         adaptiveStream: false,
         dynacast: true,
         audioCaptureDefaults: MIC_CONSTRAINTS,
-        videoCaptureDefaults: { resolution: LivekitClient.VideoPresets.h1080.resolution, facingMode: "user" },
+        videoCaptureDefaults: { resolution: LivekitClient.VideoPresets.h1080.resolution, frameRate: 30, facingMode: "user" },
         publishDefaults: {
-          audioPreset: LivekitClient.AudioPresets.speech, dtx: true, red: true, simulcast: true,
-          videoEncoding: { maxBitrate: 4_500_000, maxFramerate: 30 },
-          videoSimulcastLayers: [LivekitClient.VideoPresets.h360],
-          degradationPreference: "maintain-resolution",
-          screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30 }
+          audioPreset: { maxBitrate: 48_000, priority: "high" },
+          dtx: false,
+          red: false,
+          ...CAM_PUBLISH_DEFAULTS,
+          screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30, priority: "high" }
         }
       });
 
@@ -2048,7 +2116,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         scheduleDmRefresh();
       });
       lkRoom.on(LivekitClient.RoomEvent.ParticipantDisconnected, (p) => {
-        const pid = p.identity; delete peerNames[pid]; delete peerAvatars[pid]; delete pendingScreenRequests[pid]; lkSpeakingIds.delete(pid);
+        const pid = p.identity;
+        for (const pub of p.trackPublications.values()) { if (pub.trackSid) appliedTrackQuality.delete(pub.trackSid); }
+        delete peerNames[pid]; delete peerAvatars[pid]; delete pendingScreenRequests[pid]; lkSpeakingIds.delete(pid);
         document.getElementById(`req-${pid}`)?.remove(); removeVideoTile(pid); scheduleDmRefresh(); syncWhisperAudioTracks();
       });
       lkRoom.on(LivekitClient.RoomEvent.DataReceived, (payload, participant) => {
@@ -2065,26 +2135,53 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
         const pid = participant.identity, pName = participant.name || peerNames[pid] || `User ${pid}`, pAvatar = peerAvatars[pid] || "";
         if (!peerNames[pid]) { peerNames[pid] = pName; scheduleDmRefresh(); }
+        tuneLowLatencyTrack(track);
         if (track.kind === LivekitClient.Track.Kind.Audio) attachRemoteAudio(track);
         else if (publication.source === LivekitClient.Track.Source.ScreenShare) showRemoteScreenStage(pName, track, publication);
         else if (publication.source === LivekitClient.Track.Source.Camera) {
-          const tile = ensureVideoTile(pid, pName, true, pAvatar); track.attach(tile.querySelector("video"));
-          setTilePlaceholder(pid, !publication.isMuted, "Camera Off"); applySubscriptionEfficiency();
+          const tile = ensureVideoTile(pid, pName, true, pAvatar);
+          const isFeatured = tile.classList.contains("featured-tile");
+          const isVisible = !tile.classList.contains("page-hidden");
+          applyPublicationQuality(publication, isVisible, isFeatured);
+          track.attach(tile.querySelector("video"));
+          setTilePlaceholder(pid, !publication.isMuted, "Camera Off");
         }
         scheduleParticipantsRender();
       });
       lkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, async (track, publication, participant) => {
+        if (publication?.trackSid) appliedTrackQuality.delete(publication.trackSid);
         if (track.kind === LivekitClient.Track.Kind.Audio) { track.detach().forEach(el => el.remove()); document.getElementById(`audio-${track.sid}`)?.remove(); syncWhisperAudioTracks(); }
         else if (publication.source === LivekitClient.Track.Source.ScreenShare) { track.detach(screenStageVideo); await hideScreenStage(); }
         else if (publication.source === LivekitClient.Track.Source.Camera) { const tile = document.getElementById(`tile-${participant.identity}`); if (tile) { track.detach(tile.querySelector("video")); setTilePlaceholder(participant.identity, false, "Camera Off"); } }
         scheduleParticipantsRender();
       });
-      lkRoom.on(LivekitClient.RoomEvent.TrackPublished, scheduleParticipantsRender);
-      lkRoom.on(LivekitClient.RoomEvent.TrackUnpublished, scheduleParticipantsRender);
+      lkRoom.on(LivekitClient.RoomEvent.TrackPublished, (pub, participant) => {
+        if (pub.source === LivekitClient.Track.Source.Camera && participant) {
+          const tile = document.getElementById(`tile-${participant.identity}`);
+          applyPublicationQuality(pub, tile ? !tile.classList.contains("page-hidden") : true, Boolean(tile?.classList.contains("featured-tile")));
+        }
+        scheduleParticipantsRender();
+      });
+      lkRoom.on(LivekitClient.RoomEvent.TrackUnpublished, (pub) => {
+        if (pub?.trackSid) appliedTrackQuality.delete(pub.trackSid);
+        scheduleParticipantsRender();
+      });
       lkRoom.on(LivekitClient.RoomEvent.TrackMuted, (pub, p) => { if (pub.source === LivekitClient.Track.Source.Camera && p.identity !== clientId) setTilePlaceholder(p.identity, false, "Camera Off"); scheduleParticipantsRender(); });
-      lkRoom.on(LivekitClient.RoomEvent.TrackUnmuted, (pub, p) => { if (pub.source === LivekitClient.Track.Source.Camera && p.identity !== clientId) setTilePlaceholder(p.identity, true, "Camera Off"); scheduleParticipantsRender(); });
+      lkRoom.on(LivekitClient.RoomEvent.TrackUnmuted, (pub, p) => {
+        if (pub.track) tuneLowLatencyTrack(pub.track);
+        if (pub.source === LivekitClient.Track.Source.Camera && p.identity !== clientId) {
+          setTilePlaceholder(p.identity, true, "Camera Off");
+          const tile = document.getElementById(`tile-${p.identity}`);
+          applyPublicationQuality(pub, tile ? !tile.classList.contains("page-hidden") : true, Boolean(tile?.classList.contains("featured-tile")));
+        }
+        scheduleParticipantsRender();
+      });
       lkRoom.on(LivekitClient.RoomEvent.LocalTrackPublished, (pub) => {
-        if (pub.source === LivekitClient.Track.Source.Camera && pub.track) { pub.track.attach(ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video")); setTilePlaceholder("local", true, "Camera Disabled"); }
+        if (pub.source === LivekitClient.Track.Source.Camera && pub.track) {
+          if (pub.track.mediaStreamTrack) pub.track.mediaStreamTrack.contentHint = "motion";
+          pub.track.attach(ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video"));
+          setTilePlaceholder("local", true, "Camera Disabled");
+        }
         else if (pub.source === LivekitClient.Track.Source.Microphone && pub.track?.mediaStreamTrack) { startLocalVoiceMonitor(pub.track.mediaStreamTrack); attachAudioTrackToRecorder(pub.track.mediaStreamTrack); syncWhisperAudioTracks(); }
         else if (pub.source === LivekitClient.Track.Source.ScreenShare && pub.track?.mediaStreamTrack) pub.track.mediaStreamTrack.contentHint = "detail";
         scheduleParticipantsRender();
@@ -2107,6 +2204,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         peerNames[pid] = pName; ensureVideoTile(pid, pName, true, pAvatar);
         for (const pub of participant.trackPublications.values()) {
           if (pub.isSubscribed && pub.track) {
+            tuneLowLatencyTrack(pub.track);
             if (pub.track.kind === LivekitClient.Track.Kind.Audio) attachRemoteAudio(pub.track);
             else if (pub.source === LivekitClient.Track.Source.ScreenShare) showRemoteScreenStage(pName, pub.track, pub);
             else if (pub.source === LivekitClient.Track.Source.Camera) { pub.track.attach(ensureVideoTile(pid, pName, true, pAvatar).querySelector("video")); setTilePlaceholder(pid, !pub.isMuted, "Camera Off"); }
@@ -2114,6 +2212,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
       }
       pruneGhostTiles(); applySubscriptionEfficiency(); refreshDmDropdown(); renderParticipantsList();
+      realtimeSyncTimer = setInterval(enforceRealtimeMediaSync, 4000);
       if (keepAwakeEnabled) requestWakeLock();
       if (isHost && currentHostId === clientId && autoRecordOnJoin && !isRecordingLocally) setTimeout(() => { if (hasJoinedRoom && isHost && currentHostId === clientId && !isRecordingLocally) startHostRecording(); }, 400);
     }
@@ -2193,7 +2292,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     function enterMeetingScreen(roomId, title) {
       currentRoomId = roomId; currentMeetingTitle = title || `Room ${roomId}`;
       isLeavingCall = false; wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; speakerMuted = false; hasJoinedRoom = false; rejoinToken = "";
-      waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null;
+      waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null; appliedTrackQuality.clear();
       syncMeetingCountdown(null, null);
       pinnedTileId = null; lastActiveSpeakerTileId = null; lastSpeakingKey = ""; lkSpeakingIds.clear(); seenMsgIds.clear();
       wbOpen = false; wbLocked = false; wbHistory = []; redrawWhiteboard();
@@ -2306,6 +2405,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     copyCallLinkBtn.onclick = () => copyText(getMeetingUrl(currentRoomId), copyCallLinkBtn);
     leaveBtn.onclick = async () => {
       isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); wsPingTimer = null;
+      clearInterval(realtimeSyncTimer); realtimeSyncTimer = null; appliedTrackQuality.clear();
       syncMeetingCountdown(null, null);
       await exitFloatingPip(); stopPipStream(); stopBackgroundKeepalive(); await releaseWakeLock();
       clearTimeout(participantsRenderTimer); participantsRenderTimer = null; clearTimeout(dmRefreshTimer); dmRefreshTimer = null;
@@ -2332,7 +2432,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     };
 
     function handlePageExit() {
-      isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer);
+      isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); clearInterval(realtimeSyncTimer);
       releaseWakeLock(); stopBackgroundKeepalive(); stopPipStream();
       if (ws) try { ws.close(); } catch {}
       if (lkRoom) try { lkRoom.disconnect(); } catch {}
