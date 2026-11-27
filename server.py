@@ -379,7 +379,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
   <div id="call-view" class="hidden">
     <div id="banner-container"></div>
-    <video id="pip-video" autoplay muted playsinline style="position:fixed;width:2px;height:2px;opacity:0.01;pointer-events:none;bottom:0;right:0;"></video>
+    <video id="pip-video" autoplay playsinline style="position:fixed;width:16px;height:16px;opacity:0.001;pointer-events:none;bottom:0;right:0;z-index:-1;"></video>
     <header id="call-header">
       <div class="call-info">
         <span class="call-title"><span id="call-title-text">Meeting</span><span id="host-badge" class="host-pill hidden">Host</span><span id="participant-count" class="count-pill">👥 1 / 100</span><span id="timer-pill" class="timer-pill hidden">⏱️ 00:00</span><button id="extend-time-btn" class="secondary hidden" type="button" style="padding: 2px 7px; font-size: 0.72rem;" title="Extend meeting by 15 minutes">+15m</button><span id="joining-count-pill" class="joining-pill hidden">⏳ 0</span><span id="recording-pill" class="rec-pill hidden">● REC</span></span>
@@ -398,7 +398,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       </div>
       <div class="secondary-controls">
         <select id="view-mode-select" title="Switch Meeting View"><option value="grid">📐 Grid View</option><option value="speaker">🎤 Speaker View</option><option value="sidebar">◫ Sidebar View</option><option value="compact">🪪 Compact View</option></select>
-        <select id="quality-mode-select" title="Video Quality & Smoothness"><option value="auto">🎥 Auto HD (Smooth)</option><option value="saver">📶 Data Saver (360p)</option></select>
+        <select id="quality-mode-select" title="Video Quality & Smoothness"><option value="auto">🎥 Auto HD (Smooth)</option><option value="hd">🌟 Full HD (1080p)</option><option value="saver">📶 Data Saver (360p)</option></select>
         <select id="call-theme-select" title="Appearance Mode"><option value="dark">🌙 Night</option><option value="system">🌓 System</option><option value="light">☀️ Light</option></select>
         <button id="wake-lock-btn" class="secondary" type="button" title="Keep phone screen awake even when camera is off">🔆 Awake: On</button>
         <button id="pip-btn" class="secondary" type="button" title="Open floating mini window (Picture-in-Picture)">🪟 Float Screen</button>
@@ -593,7 +593,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     let meetingEndsAtMs = null, serverTimeOffsetMs = 0, countdownTimer = null;
     let themeMode = localStorage.getItem("vc_theme") || "dark";
     let keepAwakeEnabled = localStorage.getItem("vc_keep_awake") !== "0";
-    let wakeLockSentinel = null, bgKeepaliveCtx = null, bgKeepaliveAudio = null;
+    let wakeLockSentinel = null, bgKeepaliveCtx = null, bgKeepaliveAudio = null, bgKeepaliveStream = null;
     let pipCanvas = null, pipWorker = null, pipWorkerUrl = null, pipDrawTimer = null, pipStream = null, isPipActive = false;
 
     let currentViewMode = localStorage.getItem("vc_view_mode") || "grid";
@@ -725,9 +725,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
           const osc = bgKeepaliveCtx.createOscillator(), gain = bgKeepaliveCtx.createGain();
           gain.gain.value = 0.00001;
           osc.connect(gain); gain.connect(dest); osc.start();
+          bgKeepaliveStream = dest.stream;
           bgKeepaliveAudio = document.createElement("audio");
           bgKeepaliveAudio.playsInline = true;
-          bgKeepaliveAudio.srcObject = dest.stream;
+          bgKeepaliveAudio.srcObject = bgKeepaliveStream;
           bgKeepaliveAudio.play().catch(() => {});
         } catch {}
       }
@@ -738,6 +739,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         try { bgKeepaliveAudio.pause(); bgKeepaliveAudio.srcObject = null; } catch {}
         bgKeepaliveAudio = null;
       }
+      bgKeepaliveStream = null;
       if (bgKeepaliveCtx) { bgKeepaliveCtx.close().catch(() => {}); bgKeepaliveCtx = null; }
       if ("mediaSession" in navigator) { try { navigator.mediaSession.playbackState = "none"; } catch {} }
     }
@@ -811,7 +813,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (!pipCanvas) { pipCanvas = document.createElement("canvas"); pipCanvas.width = 640; pipCanvas.height = 360; }
       drawPipFrame();
       if (!pipStream) {
-        pipStream = pipCanvas.captureStream(15);
+        const tracks = [...pipCanvas.captureStream(15).getVideoTracks()];
+        if (bgKeepaliveStream) tracks.push(...bgKeepaliveStream.getAudioTracks());
+        pipStream = new MediaStream(tracks);
+        pipVideo.muted = !bgKeepaliveStream;
+        pipVideo.volume = 0.01;
         pipVideo.srcObject = pipStream;
         pipVideo.autoPictureInPicture = true;
       }
@@ -847,7 +853,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
           showNoticeBanner("⚠️ Floating window is not supported by this browser (background audio still works).", "denied", 4500);
         }
       } catch {
-        showNoticeBanner("⚠️ Could not open floating window. Tap 'Float Screen' again after audio/video starts.", "denied", 3500);
+        showNoticeBanner("⚠️ Tap 'Float Screen' before pressing Home (check Android Picture-in-Picture permission for Chrome).", "denied", 4500);
       }
     }
     async function exitFloatingPip() {
@@ -1125,7 +1131,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     }
 
     function applyQualityMode(mode) {
-      qualityMode = mode === "saver" ? "saver" : "auto"; qualityModeSelect.value = qualityMode;
+      qualityMode = ["saver", "hd", "auto"].includes(mode) ? mode : "auto"; qualityModeSelect.value = qualityMode;
       try { localStorage.setItem("vc_quality_mode", qualityMode); } catch {}
       applySubscriptionEfficiency();
     }
@@ -1144,9 +1150,14 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             try {
               pub.setEnabled?.(isVisible);
               if (isVisible) {
-                if (qualityMode === "saver") pub.setVideoQuality?.(LivekitClient.VideoQuality.LOW);
-                else if (isFeatured || tileOrder.length <= 4) pub.setVideoQuality?.(LivekitClient.VideoQuality.HIGH);
-                else pub.setVideoQuality?.(LivekitClient.VideoQuality.MEDIUM);
+                if (qualityMode === "saver") {
+                  pub.setVideoQuality?.(LivekitClient.VideoQuality.LOW);
+                } else if (qualityMode === "hd" || isFeatured || tileOrder.length <= 9) {
+                  pub.setVideoQuality?.(LivekitClient.VideoQuality.HIGH);
+                  pub.setVideoDimensions?.({ width: 1920, height: 1080 });
+                } else {
+                  pub.setVideoQuality?.(LivekitClient.VideoQuality.MEDIUM);
+                }
               }
             } catch {}
           }
@@ -1955,7 +1966,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         catch (err) { handleMediaError(err, "camera"); return false; }
       }
       try {
-        await lkRoom.localParticipant.setCameraEnabled(true, { resolution: LivekitClient.VideoPresets.h1080.resolution }); camEnabled = true;
+        await lkRoom.localParticipant.setCameraEnabled(
+          true,
+          { resolution: LivekitClient.VideoPresets.h1080.resolution, facingMode: "user" },
+          { videoEncoding: { maxBitrate: 4_500_000, maxFramerate: 30 }, simulcast: true, videoSimulcastLayers: [LivekitClient.VideoPresets.h360], degradationPreference: "maintain-resolution" }
+        ); camEnabled = true;
         const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera), lv = ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video");
         if (pub?.track) pub.track.attach(lv);
         setTilePlaceholder("local", true, "Camera Disabled"); updateControlButtons(); return true;
@@ -2013,15 +2028,16 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (lkRoom) { try { await lkRoom.disconnect(); } catch {} lkRoom = null; }
 
       lkRoom = new LivekitClient.Room({
-        adaptiveStream: { pixelDensity: "screen" },
+        adaptiveStream: false,
         dynacast: true,
         audioCaptureDefaults: MIC_CONSTRAINTS,
-        videoCaptureDefaults: { resolution: LivekitClient.VideoPresets.h1080.resolution },
+        videoCaptureDefaults: { resolution: LivekitClient.VideoPresets.h1080.resolution, facingMode: "user" },
         publishDefaults: {
           audioPreset: LivekitClient.AudioPresets.speech, dtx: true, red: true, simulcast: true,
-          videoEncoding: LivekitClient.VideoPresets.h1080.encoding,
-          videoSimulcastLayers: [LivekitClient.VideoPresets.h720, LivekitClient.VideoPresets.h360, LivekitClient.VideoPresets.h180],
-          screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30 }, degradationPreference: "maintain-resolution"
+          videoEncoding: { maxBitrate: 4_500_000, maxFramerate: 30 },
+          videoSimulcastLayers: [LivekitClient.VideoPresets.h360],
+          degradationPreference: "maintain-resolution",
+          screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30 }
         }
       });
 
