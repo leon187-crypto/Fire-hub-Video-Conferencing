@@ -32,7 +32,7 @@ waiting_rooms: dict[str, dict[str, dict]] = {}
 room_meta: dict[str, dict] = {}
 
 HTML_CONTENT = r"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -42,112 +42,174 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/gh/yusitnikov/fix-webm-duration/fix-webm-duration.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <style>
+    :root {
+      --bg-page: #0f1115;
+      --bg-surface: #181b22;
+      --bg-surface-2: #14171d;
+      --bg-input: #101217;
+      --bg-stage: #090b0f;
+      --bg-drawer: #1c2029;
+      --bg-banner: #1f2430;
+      --bg-pill: #272c38;
+      --bg-react: #232834;
+      --bg-react-hover: #303746;
+      --bg-mobile-bar: #12151b;
+      --border: #2b303b;
+      --border-strong: #333844;
+      --text-main: #f4f4f5;
+      --text-heading: #e4e4e7;
+      --text-muted: #a1a1aa;
+      --text-dim: #71717a;
+      --btn-sec-bg: #303642;
+      --btn-sec-text: #ffffff;
+      --link-color: #93c5fd;
+      --overlay-bg: rgba(10, 12, 16, 0.9);
+      --msg-bg: #272c38;
+      --msg-text: #f4f4f5;
+      --dm-bg: #2e1f47;
+      --tab-active-bg: #1e222b;
+      --timer-bg: #1e293b;
+      --timer-text: #93c5fd;
+      --wait-box-bg: #261e12;
+      --wait-box-text: #fde68a;
+    }
+    :root[data-theme="light"] {
+      --bg-page: #f1f5f9;
+      --bg-surface: #ffffff;
+      --bg-surface-2: #f8fafc;
+      --bg-input: #ffffff;
+      --bg-stage: #e2e8f0;
+      --bg-drawer: #ffffff;
+      --bg-banner: #ffffff;
+      --bg-pill: #e2e8f0;
+      --bg-react: #e2e8f0;
+      --bg-react-hover: #cbd5e1;
+      --bg-mobile-bar: #f8fafc;
+      --border: #cbd5e1;
+      --border-strong: #94a3b8;
+      --text-main: #0f172a;
+      --text-heading: #1e293b;
+      --text-muted: #475569;
+      --text-dim: #64748b;
+      --btn-sec-bg: #e2e8f0;
+      --btn-sec-text: #0f172a;
+      --link-color: #1d4ed8;
+      --overlay-bg: rgba(241, 245, 249, 0.92);
+      --msg-bg: #e2e8f0;
+      --msg-text: #0f172a;
+      --dm-bg: #f3e8ff;
+      --tab-active-bg: #e2e8f0;
+      --timer-bg: #dbeafe;
+      --timer-text: #1d4ed8;
+      --wait-box-bg: #fef3c7;
+      --wait-box-text: #92400e;
+    }
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
-    body { margin: 0; background: #0f1115; color: #f4f4f5; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+    body { margin: 0; background: var(--bg-page); color: var(--text-main); min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
     .hidden, .page-hidden { display: none !important; }
     .mobile-only { display: none !important; }
     #lobby-view { max-width: 960px; width: 100%; margin: 2rem auto; padding: 0 1.25rem; display: grid; gap: 1.5rem; }
     #lobby-home-sections { display: grid; gap: 1.5rem; }
     .lobby-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
     .lobby-header h1 { margin: 0; font-size: 1.6rem; }
-    .profile-setup { display: flex; align-items: center; gap: 0.85rem; background: #181b22; border: 1px solid #2b303b; padding: 0.65rem 0.9rem; border-radius: 12px; flex-wrap: wrap; }
+    .profile-setup { display: flex; align-items: center; gap: 0.85rem; background: var(--bg-surface); border: 1px solid var(--border); padding: 0.65rem 0.9rem; border-radius: 12px; flex-wrap: wrap; }
     .avatar-circle { width: 52px; height: 52px; border-radius: 50%; background: #2563eb; color: #fff; font-weight: 700; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; border: 2px solid #3b82f6; transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.15s ease; }
     .avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
     .avatar-circle.large { width: 82px; height: 82px; font-size: 1.7rem; }
     .avatar-circle.small { width: 34px; height: 34px; font-size: 0.85rem; border-width: 1.5px; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
-    .card { background: #181b22; border: 1px solid #2b303b; border-radius: 12px; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.85rem; }
-    .card h2 { margin: 0; font-size: 1.1rem; color: #e4e4e7; }
-    label { font-size: 0.85rem; color: #a1a1aa; display: block; margin-bottom: 0.3rem; }
-    input[type="text"], input[type="datetime-local"], select { width: 100%; padding: 0.6rem 0.75rem; border-radius: 8px; border: 1px solid #333844; background: #101217; color: #fff; font-size: 0.95rem; }
-    .checkbox-row { display: flex; align-items: center; gap: 0.55rem; font-size: 0.88rem; color: #d4d4d8; cursor: pointer; margin: 0; }
+    .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.85rem; }
+    .card h2 { margin: 0; font-size: 1.1rem; color: var(--text-heading); }
+    label { font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem; }
+    input[type="text"], input[type="datetime-local"], select { width: 100%; padding: 0.6rem 0.75rem; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg-input); color: var(--text-main); font-size: 0.95rem; }
+    .checkbox-row { display: flex; align-items: center; gap: 0.55rem; font-size: 0.88rem; color: var(--text-heading); cursor: pointer; margin: 0; }
     .checkbox-row input { width: auto; accent-color: #2563eb; cursor: pointer; }
     button, .btn-link { padding: 0.55rem 0.9rem; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.88rem; background: #2563eb; color: #fff; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; touch-action: manipulation; transition: opacity 0.15s, background 0.15s; }
     button:hover:not(:disabled), .btn-link:hover { opacity: 0.9; }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
-    button.danger { background: #dc2626; }
-    button.secondary, .btn-link.secondary { background: #303642; }
-    button.active { background: #16a34a; }
-    button.warning { background: #d97706; }
+    button.danger { background: #dc2626; color: #fff; }
+    button.secondary, .btn-link.secondary { background: var(--btn-sec-bg); color: var(--btn-sec-text); }
+    button.active { background: #16a34a; color: #fff; }
+    button.warning { background: #d97706; color: #fff; }
     .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
     .meeting-list { display: flex; flex-direction: column; gap: 0.75rem; }
-    .meeting-item { background: #101217; border: 1px solid #2b303b; border-radius: 8px; padding: 0.9rem 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
+    .meeting-item { background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
     .meeting-meta { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; flex: 1; }
     .meeting-title { font-weight: 600; font-size: 1rem; word-break: break-word; }
-    .meeting-sub { font-size: 0.82rem; color: #a1a1aa; word-break: break-word; }
-    .link-box { background: #101217; border: 1px dashed #3b82f6; padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 0.85rem; word-break: break-all; color: #93c5fd; }
+    .meeting-sub { font-size: 0.82rem; color: var(--text-muted); word-break: break-word; }
+    .link-box { background: var(--bg-input); border: 1px dashed #3b82f6; padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 0.85rem; word-break: break-all; color: var(--link-color); }
     #player-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1rem; }
-    .player-box { background: #181b22; border: 1px solid #333844; border-radius: 12px; padding: 1rem; width: min(95vw, 960px); display: flex; flex-direction: column; gap: 0.75rem; }
+    .player-box { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 12px; padding: 1rem; width: min(95vw, 960px); display: flex; flex-direction: column; gap: 0.75rem; }
     .player-header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
     #player-video { width: 100%; max-height: 75dvh; background: #000; border-radius: 8px; }
     #call-view { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; position: relative; }
-    #call-header { order: 1; padding: 0.65rem 1.15rem; background: #181b22; border-bottom: 1px solid #2b303b; display: flex; justify-content: space-between; align-items: center; gap: 0.65rem; flex-shrink: 0; }
+    #call-header { order: 1; padding: 0.65rem 1.15rem; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 0.65rem; flex-shrink: 0; }
     .call-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
     .call-title { font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
     .host-pill { font-size: 0.7rem; background: #7c3aed; color: #fff; padding: 2px 7px; border-radius: 999px; font-weight: 600; }
-    .count-pill { font-size: 0.75rem; background: #272c38; color: #e4e4e7; padding: 2px 8px; border-radius: 999px; }
-    .timer-pill { font-size: 0.75rem; background: #1e293b; color: #93c5fd; border: 1px solid #3b82f6; padding: 2px 8px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .count-pill { font-size: 0.75rem; background: var(--bg-pill); color: var(--text-heading); padding: 2px 8px; border-radius: 999px; }
+    .timer-pill { font-size: 0.75rem; background: var(--timer-bg); color: var(--timer-text); border: 1px solid #3b82f6; padding: 2px 8px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; }
     .timer-pill.warning { background: #451a03; color: #fde68a; border-color: #f59e0b; }
     .timer-pill.danger { background: #450a0a; color: #fecaca; border-color: #ef4444; animation: pulseRec 1.2s infinite; }
     .joining-pill { font-size: 0.73rem; background: #b45309; color: #fff; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
     .rec-pill { font-size: 0.72rem; background: #dc2626; color: #fff; padding: 2px 9px; border-radius: 999px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; animation: pulseRec 1.4s infinite; }
     @keyframes pulseRec { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
-    .call-sub { font-size: 0.78rem; color: #a1a1aa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .call-sub { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .header-actions { display: flex; gap: 0.45rem; align-items: center; flex-shrink: 0; }
-    #controls-dock { order: 2; background: #14171d; border-bottom: 1px solid #2b303b; padding: 0.5rem 1.15rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; flex-shrink: 0; position: relative; z-index: 25; }
+    #controls-dock { order: 2; background: var(--bg-surface-2); border-bottom: 1px solid var(--border); padding: 0.5rem 1.15rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; flex-shrink: 0; position: relative; z-index: 25; }
     .primary-controls, .secondary-controls { display: flex; gap: 0.45rem; flex-wrap: wrap; align-items: center; }
-    #view-mode-select, #quality-mode-select { width: auto; padding: 0.45rem 0.65rem; font-size: 0.84rem; font-weight: 600; background: #303642; border: 1px solid #454d5e; cursor: pointer; }
-    .audio-switch { display: inline-flex; background: #101217; border: 1px solid #333844; border-radius: 8px; padding: 2px; gap: 2px; }
-    .audio-switch button { background: transparent; color: #a1a1aa; padding: 0.42rem 0.75rem; border-radius: 6px; font-size: 0.84rem; }
+    #view-mode-select, #quality-mode-select, #call-theme-select, #lobby-theme-select { width: auto; padding: 0.45rem 0.65rem; font-size: 0.84rem; font-weight: 600; background: var(--btn-sec-bg); color: var(--btn-sec-text); border: 1px solid var(--border-strong); cursor: pointer; }
+    .audio-switch { display: inline-flex; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 2px; gap: 2px; }
+    .audio-switch button { background: transparent; color: var(--text-muted); padding: 0.42rem 0.75rem; border-radius: 6px; font-size: 0.84rem; }
     .audio-switch button.selected-mic { background: #16a34a; color: #fff; }
     .audio-switch button.selected-speaker { background: #2563eb; color: #fff; }
     .badge { background: #ef4444; color: #fff; font-size: 0.72rem; padding: 1px 6px; border-radius: 999px; margin-left: 3px; }
     .badge.amber { background: #d97706; }
     #call-body { order: 3; flex: 1; display: flex; min-height: 0; position: relative; }
     #stage { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; overflow: hidden; }
-    #mobile-view-bar { display: none; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: #12151b; border-bottom: 1px solid #242934; flex-shrink: 0; overflow-x: auto; }
-    .m-view-pill { padding: 0.24rem 0.55rem; font-size: 0.72rem; border-radius: 999px; background: #232834; color: #a1a1aa; white-space: nowrap; }
+    #mobile-view-bar { display: none; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: var(--bg-mobile-bar); border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; }
+    .m-view-pill { padding: 0.24rem 0.55rem; font-size: 0.72rem; border-radius: 999px; background: var(--bg-react); color: var(--text-muted); white-space: nowrap; }
     .m-view-pill.active-pill { background: #2563eb; color: #fff; }
-    .swipe-hint { font-size: 0.68rem; color: #71717a; margin-left: 4px; white-space: nowrap; }
+    .swipe-hint { font-size: 0.68rem; color: var(--text-dim); margin-left: 4px; white-space: nowrap; }
     #view-swipe-toast { position: absolute; top: 52px; left: 50%; transform: translateX(-50%); background: rgba(17, 24, 39, 0.92); border: 1px solid #3b82f6; color: #fff; padding: 0.42rem 0.9rem; border-radius: 999px; font-size: 0.84rem; font-weight: 600; z-index: 40; pointer-events: none; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45); animation: popIn 0.16s ease-out; }
     @keyframes swipeInNext { from { opacity: 0.55; transform: translateX(30px); } to { opacity: 1; transform: translateX(0); } }
     @keyframes swipeInPrev { from { opacity: 0.55; transform: translateX(-30px); } to { opacity: 1; transform: translateX(0); } }
     #video-grid.swipe-next { animation: swipeInNext 0.22s ease-out; }
     #video-grid.swipe-prev { animation: swipeInPrev 0.22s ease-out; }
-    .stage-overlay { position: absolute; inset: 0; background: rgba(10, 12, 16, 0.9); z-index: 30; display: flex; align-items: center; justify-content: center; padding: 1rem; }
-    .join-modal { background: #181b22; border: 1px solid #333844; border-radius: 14px; padding: 1.5rem; width: min(94%, 440px); max-height: 88dvh; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 1rem; text-align: center; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); }
+    .stage-overlay { position: absolute; inset: 0; background: var(--overlay-bg); z-index: 30; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    .join-modal { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 14px; padding: 1.5rem; width: min(94%, 440px); max-height: 88dvh; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 1rem; text-align: center; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35); }
     .join-modal h2 { margin: 0; font-size: 1.25rem; }
-    .join-modal p { margin: 0; font-size: 0.88rem; color: #a1a1aa; }
+    .join-modal p { margin: 0; font-size: 0.88rem; color: var(--text-muted); }
     .join-choice-grid { display: grid; gap: 0.65rem; width: 100%; }
     .join-choice-btn { padding: 0.85rem 1rem; font-size: 0.95rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
-    .spinner { width: 28px; height: 28px; border: 3px solid #333844; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.9s linear infinite; }
+    .spinner { width: 28px; height: 28px; border: 3px solid var(--border-strong); border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.9s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     #banner-container { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 55; display: flex; flex-direction: column; gap: 0.5rem; width: min(92%, 520px); pointer-events: none; }
-    .banner-card { pointer-events: auto; background: #1f2430; border: 1px solid #3b82f6; border-radius: 10px; padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.65rem; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.65); animation: popIn 0.2s ease-out; }
-    .banner-card.approved { border-color: #16a34a; background: #132a1c; }
-    .banner-card.denied { border-color: #dc2626; background: #3b1212; }
-    .banner-card.waiting-req { border-color: #f59e0b; background: #261e12; }
+    .banner-card { pointer-events: auto; background: var(--bg-banner); color: var(--text-main); border: 1px solid #3b82f6; border-radius: 10px; padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.65rem; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35); animation: popIn 0.2s ease-out; }
+    .banner-card.approved { border-color: #16a34a; background: #132a1c; color: #f4f4f5; }
+    .banner-card.denied { border-color: #dc2626; background: #3b1212; color: #f4f4f5; }
+    .banner-card.waiting-req { border-color: #f59e0b; background: #261e12; color: #f4f4f5; }
     .banner-text { font-size: 0.88rem; line-height: 1.4; display: flex; align-items: center; gap: 0.55rem; }
-    #screen-stage { background: #090b0f; border-bottom: 1px solid #2b303b; padding: 0.6rem 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; max-height: 55dvh; position: relative; flex-shrink: 0; }
+    #screen-stage { background: var(--bg-stage); border-bottom: 1px solid var(--border); padding: 0.6rem 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; max-height: 55dvh; position: relative; flex-shrink: 0; }
     .screen-stage-header { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem; flex-shrink: 0; }
-    #screen-stage-label { font-size: 0.84rem; color: #93c5fd; font-weight: 600; }
+    #screen-stage-label { font-size: 0.84rem; color: var(--link-color); font-weight: 600; }
     #screen-fullscreen-btn { padding: 0.3rem 0.7rem; font-size: 0.8rem; flex-shrink: 0; }
     #screen-stage video { max-height: 45dvh; max-width: 100%; border-radius: 8px; background: #000; cursor: pointer; }
     #screen-stage:fullscreen, #screen-stage:-webkit-full-screen { max-height: 100vh; width: 100vw; height: 100vh; padding: 0.45rem 0.75rem; background: #000; justify-content: flex-start; }
     #screen-stage:fullscreen .screen-stage-header, #screen-stage:-webkit-full-screen .screen-stage-header { margin-bottom: 0.35rem; }
     #screen-stage:fullscreen video, #screen-stage:-webkit-full-screen video { flex: 1; min-height: 0; max-height: none; width: 100%; height: 100%; object-fit: contain; border-radius: 0; }
-    #whiteboard-stage { background: #14171d; border-bottom: 1px solid #2b303b; padding: 0.55rem 0.85rem; display: flex; flex-direction: column; align-items: center; gap: 0.45rem; max-height: 64dvh; flex-shrink: 0; position: relative; }
+    #whiteboard-stage { background: var(--bg-surface-2); border-bottom: 1px solid var(--border); padding: 0.55rem 0.85rem; display: flex; flex-direction: column; align-items: center; gap: 0.45rem; max-height: 64dvh; flex-shrink: 0; position: relative; }
     .wb-toolbar { width: 100%; display: flex; align-items: center; gap: 0.4rem; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; flex-shrink: 0; }
     .wb-toolbar button { padding: 0.34rem 0.6rem; font-size: 0.78rem; white-space: nowrap; flex-shrink: 0; }
-    .wb-toolbar button.wb-tool-active { background: #2563eb; outline: 2px solid #93c5fd; }
-    .wb-colors { display: inline-flex; align-items: center; gap: 4px; background: #101217; padding: 3px 6px; border-radius: 8px; border: 1px solid #333844; flex-shrink: 0; }
+    .wb-toolbar button.wb-tool-active { background: #2563eb; color: #fff; outline: 2px solid #93c5fd; }
+    .wb-colors { display: inline-flex; align-items: center; gap: 4px; background: var(--bg-input); padding: 3px 6px; border-radius: 8px; border: 1px solid var(--border-strong); flex-shrink: 0; }
     .wb-swatch { width: 20px; height: 20px; min-width: 20px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
-    .wb-swatch.active-swatch { border-color: #fff; transform: scale(1.15); }
-    .wb-canvas-wrap { position: relative; width: 100%; max-width: 960px; aspect-ratio: 16 / 9; max-height: 48dvh; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #333844; display: flex; align-items: center; justify-content: center; }
+    .wb-swatch.active-swatch { border-color: #3b82f6; transform: scale(1.15); }
+    .wb-canvas-wrap { position: relative; width: 100%; max-width: 960px; aspect-ratio: 16 / 9; max-height: 48dvh; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; }
     .wb-canvas-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
     #wb-preview-canvas { pointer-events: none; }
     .wb-lock-pill { font-size: 0.76rem; color: #fde68a; background: #78350f; padding: 3px 8px; border-radius: 6px; white-space: nowrap; flex-shrink: 0; }
-    #whiteboard-stage:fullscreen, #whiteboard-stage:-webkit-full-screen { max-height: 100vh; width: 100vw; height: 100vh; padding: 0.65rem; background: #0f1115; }
+    #whiteboard-stage:fullscreen, #whiteboard-stage:-webkit-full-screen { max-height: 100vh; width: 100vw; height: 100vh; padding: 0.65rem; background: var(--bg-page); }
     #whiteboard-stage:fullscreen .wb-canvas-wrap, #whiteboard-stage:-webkit-full-screen .wb-canvas-wrap { max-width: none; max-height: calc(100vh - 70px); height: calc(100vh - 70px); width: auto; }
     #video-grid { flex: 1; padding: 0.85rem; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
     #video-grid.mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.75rem; align-content: start; justify-items: center; }
@@ -162,66 +224,66 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     #video-grid.mode-sidebar.single-tile { grid-template-columns: 1fr; }
     #video-grid.mode-sidebar .video-tile { grid-column: 2; max-width: none; }
     #video-grid.mode-sidebar .video-tile.featured-tile { grid-column: 1; grid-row: 1 / span 24; position: sticky; top: 0; max-width: none; max-height: calc(100dvh - 210px); height: 100%; align-self: stretch; }
-    .video-tile { position: relative; width: 100%; max-width: 640px; aspect-ratio: 16 / 9; background: #181b22; border-radius: 10px; overflow: hidden; border: 2px solid #2b303b; display: flex; align-items: center; justify-content: center; contain: layout style; }
+    .video-tile { position: relative; width: 100%; max-width: 640px; aspect-ratio: 16 / 9; background: var(--bg-surface); border-radius: 10px; overflow: hidden; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; contain: layout style; }
     .video-tile.speaking { border-color: #22c55e; box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.55); }
-    .video-tile.speaking .placeholder { background: radial-gradient(circle at center, #1b3625 0%, #181b22 72%); }
+    .video-tile.speaking .placeholder { box-shadow: inset 0 0 0 999px rgba(34, 197, 94, 0.14); }
     .video-tile.speaking .avatar-circle { border-color: #4ade80; transform: scale(1.06); }
     .video-tile.speaking .label { background: rgba(22, 163, 74, 0.92); color: #fff; font-weight: 700; }
     .video-tile video { position: relative; z-index: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
-    .placeholder { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; gap: 0.45rem; align-items: center; justify-content: center; color: #a1a1aa; font-size: 0.85rem; background: #181b22; text-align: center; padding: 0.65rem; }
-    .label { position: absolute; bottom: 8px; left: 8px; background: rgba(0, 0, 0, 0.72); padding: 3px 8px; border-radius: 6px; font-size: 0.78rem; z-index: 2; max-width: calc(100% - 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .placeholder { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; gap: 0.45rem; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.85rem; background: var(--bg-surface); text-align: center; padding: 0.65rem; }
+    .label { position: absolute; bottom: 8px; left: 8px; background: rgba(0, 0, 0, 0.72); color: #fff; padding: 3px 8px; border-radius: 6px; font-size: 0.78rem; z-index: 2; max-width: calc(100% - 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tile-actions { position: absolute; top: 8px; left: 8px; z-index: 3; display: flex; gap: 4px; align-items: center; }
     .pin-btn, .snap-btn { background: rgba(0, 0, 0, 0.65); color: #e4e4e7; padding: 3px 7px; border-radius: 6px; font-size: 0.75rem; opacity: 0; transition: opacity 0.15s, background 0.15s; }
     .video-tile:hover .pin-btn, .video-tile:hover .snap-btn, .pin-btn.pinned { opacity: 1; }
     .pin-btn.pinned { background: #2563eb; color: #fff; }
     .snap-btn:hover { background: #16a34a; color: #fff; }
-    .tile-reaction { position: absolute; top: 8px; right: 8px; background: rgba(0, 0, 0, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); padding: 5px 9px; border-radius: 999px; font-size: 1.3rem; z-index: 3; animation: popIn 0.2s ease-out; }
+    .tile-reaction { position: absolute; top: 8px; right: 8px; background: rgba(0, 0, 0, 0.75); color: #fff; border: 1px solid rgba(255, 255, 255, 0.15); padding: 5px 9px; border-radius: 999px; font-size: 1.3rem; z-index: 3; animation: popIn 0.2s ease-out; }
     #caption-bar { position: absolute; bottom: 58px; left: 50%; transform: translateX(-50%); max-width: min(92%, 760px); background: rgba(0, 0, 0, 0.86); border: 1px solid rgba(255, 255, 255, 0.18); color: #fff; padding: 0.5rem 0.9rem; border-radius: 10px; font-size: 0.95rem; line-height: 1.4; text-align: center; z-index: 15; pointer-events: none; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); }
     #caption-speaker { color: #93c5fd; font-weight: 700; margin-right: 6px; }
-    #stage-footer { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.45rem 0.85rem; background: #14171d; border-top: 1px solid #2b303b; flex-shrink: 0; flex-wrap: wrap; }
-    #pagination-bar { display: flex; align-items: center; gap: 0.45rem; font-size: 0.82rem; color: #d4d4d8; }
+    #stage-footer { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.45rem 0.85rem; background: var(--bg-surface-2); border-top: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+    #pagination-bar { display: flex; align-items: center; gap: 0.45rem; font-size: 0.82rem; color: var(--text-heading); }
     #pagination-bar button { padding: 0.35rem 0.65rem; font-size: 0.78rem; }
     #reaction-bar { display: flex; justify-content: center; gap: 0.35rem; flex-wrap: wrap; margin: 0 auto; }
-    .react-btn { background: #232834; border: 1px solid #323949; border-radius: 999px; padding: 0.35rem 0.68rem; font-size: 1.1rem; line-height: 1; transition: transform 0.12s, background 0.12s; }
-    .react-btn:hover { transform: scale(1.15); background: #303746; }
+    .react-btn { background: var(--bg-react); border: 1px solid var(--border-strong); border-radius: 999px; padding: 0.35rem 0.68rem; font-size: 1.1rem; line-height: 1; transition: transform 0.12s, background 0.12s; }
+    .react-btn:hover { transform: scale(1.15); background: var(--bg-react-hover); }
     #reaction-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 10; }
     .floating-reaction { position: absolute; bottom: 60px; display: flex; flex-direction: column; align-items: center; gap: 2px; animation: floatUp 2.6s ease-out forwards; }
     .floating-reaction .emoji { font-size: 2.2rem; }
     .floating-reaction .who { font-size: 0.72rem; background: rgba(0, 0, 0, 0.75); padding: 2px 7px; border-radius: 999px; color: #e4e4e7; }
     @keyframes floatUp { 0% { transform: translateY(0) scale(0.7); opacity: 0; } 15% { transform: translateY(-20px) scale(1.1); opacity: 1; } 100% { transform: translateY(-240px) scale(1); opacity: 0; } }
     @keyframes popIn { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-    .side-panel { width: 340px; background: #181b22; border-left: 1px solid #2b303b; display: flex; flex-direction: column; flex-shrink: 0; height: 100%; }
-    .panel-header { padding: 0.75rem 0.9rem; border-bottom: 1px solid #2b303b; display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 0.95rem; }
+    .side-panel { width: 340px; background: var(--bg-surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; height: 100%; }
+    .panel-header { padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 0.95rem; }
     .panel-scroll { flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; }
-    .p-section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: #a1a1aa; display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem; }
-    .participant-row { background: #101217; border: 1px solid #2b303b; border-radius: 8px; padding: 0.5rem 0.65rem; display: flex; align-items: center; justify-content: space-between; gap: 0.55rem; }
-    .participant-row.speaking { border-color: #22c55e; background: #13281b; }
+    .p-section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem; }
+    .participant-row { background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.65rem; display: flex; align-items: center; justify-content: space-between; gap: 0.55rem; }
+    .participant-row.speaking { border-color: #22c55e; box-shadow: inset 0 0 0 999px rgba(34, 197, 94, 0.12); }
     .participant-row.speaking .avatar-circle { border-color: #4ade80; }
     .participant-left { display: flex; align-items: center; gap: 0.55rem; min-width: 0; flex: 1; }
     .participant-name-wrap { display: flex; flex-direction: column; min-width: 0; }
     .participant-name { font-size: 0.88rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .participant-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
-    .mini-tag { font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: #272c38; color: #d4d4d8; }
+    .mini-tag { font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: var(--bg-pill); color: var(--text-heading); }
     .mini-tag.host { background: #7c3aed; color: #fff; }
     .mini-tag.screen { background: #16a34a; color: #fff; }
     .participant-right { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; font-size: 0.88rem; }
-    .waiting-banner-box { background: #261e12; border: 1px solid #d97706; border-radius: 8px; padding: 0.65rem; font-size: 0.84rem; color: #fde68a; }
-    .chat-tabs-bar { display: flex; align-items: center; border-bottom: 1px solid #2b303b; }
+    .waiting-banner-box { background: var(--wait-box-bg); border: 1px solid #d97706; border-radius: 8px; padding: 0.65rem; font-size: 0.84rem; color: var(--wait-box-text); }
+    .chat-tabs-bar { display: flex; align-items: center; border-bottom: 1px solid var(--border); }
     .chat-tabs { display: flex; flex: 1; }
-    .chat-tab { flex: 1; background: transparent; border-radius: 0; padding: 0.75rem 0.5rem; color: #a1a1aa; border-bottom: 2px solid transparent; font-size: 0.88rem; }
-    .chat-tab.active-tab { color: #fff; border-bottom-color: #2563eb; background: #1e222b; }
-    .dm-bar { padding: 0.65rem 0.75rem; border-bottom: 1px solid #2b303b; background: #14171d; }
+    .chat-tab { flex: 1; background: transparent; border-radius: 0; padding: 0.75rem 0.5rem; color: var(--text-muted); border-bottom: 2px solid transparent; font-size: 0.88rem; }
+    .chat-tab.active-tab { color: var(--text-main); border-bottom-color: #2563eb; background: var(--tab-active-bg); }
+    .dm-bar { padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); background: var(--bg-surface-2); }
     .chat-messages { flex: 1; overflow-y: auto; padding: 0.85rem; display: flex; flex-direction: column; gap: 0.65rem; }
     .msg-item { display: flex; flex-direction: column; max-width: 88%; align-self: flex-start; }
     .msg-item.self { align-self: flex-end; }
-    .msg-meta { font-size: 0.72rem; color: #a1a1aa; margin-bottom: 3px; }
+    .msg-meta { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px; }
     .msg-item.self .msg-meta { text-align: right; }
-    .msg-bubble { background: #272c38; color: #f4f4f5; padding: 0.5rem 0.75rem; border-radius: 10px; font-size: 0.88rem; line-height: 1.35; word-break: break-word; }
+    .msg-bubble { background: var(--msg-bg); color: var(--msg-text); padding: 0.5rem 0.75rem; border-radius: 10px; font-size: 0.88rem; line-height: 1.35; word-break: break-word; }
     .msg-item.self .msg-bubble { background: #2563eb; color: #fff; }
     .msg-item.dm .msg-bubble { border: 1px solid #9333ea; }
-    .msg-item.dm:not(.self) .msg-bubble { background: #2e1f47; cursor: pointer; }
+    .msg-item.dm:not(.self) .msg-bubble { background: var(--dm-bg); cursor: pointer; }
     .dm-tag { display: inline-block; font-size: 0.68rem; background: #7e22ce; color: #fff; padding: 1px 5px; border-radius: 4px; margin-right: 4px; }
-    .chat-input-row { padding: 0.7rem; border-top: 1px solid #2b303b; display: flex; gap: 0.5rem; background: #14171d; }
+    .chat-input-row { padding: 0.7rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; background: var(--bg-surface-2); }
     .chat-input-row input { flex: 1; padding: 0.5rem 0.7rem; font-size: 0.9rem; }
     @media (max-width: 768px) {
       .hide-sm { display: none !important; }
@@ -235,14 +297,14 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       .call-title { font-size: 0.92rem; gap: 0.35rem; }
       .call-sub { display: none; }
       .header-actions button { padding: 0.4rem 0.65rem; font-size: 0.8rem; }
-      #controls-dock { order: 4; z-index: 49; border-bottom: none; border-top: 1px solid #2b303b; padding: 0.45rem 0.55rem calc(0.45rem + env(safe-area-inset-bottom)); justify-content: center; }
+      #controls-dock { order: 4; z-index: 49; border-bottom: none; border-top: 1px solid var(--border); padding: 0.45rem 0.55rem calc(0.45rem + env(safe-area-inset-bottom)); justify-content: center; }
       .primary-controls { width: 100%; justify-content: space-between; gap: 0.3rem; flex-wrap: nowrap; }
       .primary-controls .audio-switch { flex: 1.3; justify-content: center; }
       .primary-controls .audio-switch button { flex: 1; padding: 0.5rem 0.3rem; font-size: 0.76rem; }
       .primary-controls > button { flex: 1; padding: 0.52rem 0.35rem; font-size: 0.76rem; }
       #mute-speaker-btn, #mobile-more-btn { flex: 0 0 auto; white-space: nowrap; padding: 0.52rem 0.6rem; }
-      #controls-dock.more-open #mobile-more-btn { background: #16a34a; }
-      .secondary-controls { display: none; position: fixed; bottom: 60px; left: 0; right: 0; z-index: 48; max-height: 65dvh; overflow-y: auto; background: #1c2029; border-top: 1px solid #333844; padding: 0.75rem; gap: 0.5rem; flex-wrap: wrap; justify-content: center; box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.65); }
+      #controls-dock.more-open #mobile-more-btn { background: #16a34a; color: #fff; }
+      .secondary-controls { display: none; position: fixed; bottom: 60px; left: 0; right: 0; z-index: 48; max-height: 65dvh; overflow-y: auto; background: var(--bg-drawer); border-top: 1px solid var(--border-strong); padding: 0.75rem; gap: 0.5rem; flex-wrap: wrap; justify-content: center; box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.35); }
       #controls-dock.more-open .secondary-controls { display: flex; }
       .secondary-controls button, .secondary-controls select { flex: 1 1 44%; font-size: 0.84rem; padding: 0.55rem 0.65rem; }
       #video-grid { padding: 0.5rem; }
@@ -274,8 +336,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       <h1>Video Conferencing (Up to 100 Users)</h1>
       <div class="profile-setup">
         <div id="profile-avatar-preview" class="avatar-circle">U</div>
-        <div style="flex: 1; min-width: 150px;"><label for="name-input" style="margin-bottom: 2px;">Your Display Name</label><input id="name-input" type="text" placeholder="Enter your name" style="padding: 0.45rem 0.65rem;" /></div>
-        <div class="row"><input id="avatar-file-input" type="file" accept="image/*" class="hidden" /><button id="upload-avatar-btn" class="secondary" type="button" style="padding: 0.45rem 0.75rem;">🖼️ Photo</button><button id="clear-avatar-btn" class="danger hidden" type="button" style="padding: 0.45rem 0.65rem;" title="Remove Photo">✕</button></div>
+        <div style="flex: 1; min-width: 140px;"><label for="name-input" style="margin-bottom: 2px;">Your Display Name</label><input id="name-input" type="text" placeholder="Enter your name" style="padding: 0.45rem 0.65rem;" /></div>
+        <div class="row"><input id="avatar-file-input" type="file" accept="image/*" class="hidden" /><button id="upload-avatar-btn" class="secondary" type="button" style="padding: 0.45rem 0.75rem;">🖼️ Photo</button><button id="clear-avatar-btn" class="danger hidden" type="button" style="padding: 0.45rem 0.65rem;" title="Remove Photo">✕</button><select id="lobby-theme-select" title="Appearance Mode"><option value="dark">🌙 Night</option><option value="system">🌓 System</option><option value="light">☀️ Light</option></select></div>
       </div>
     </div>
     <div id="direct-room-card" class="card hidden">
@@ -293,7 +355,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
           <label class="checkbox-row"><input id="instant-approval-chk" type="checkbox" checked /> Require host approval to share screen</label>
           <label class="checkbox-row"><input id="instant-record-chk" type="checkbox" /> Record this meeting automatically</label>
           <button id="instant-btn" class="active">New Instant Meeting</button>
-          <hr style="border: 0; border-top: 1px solid #2b303b; width: 100%; margin: 0.25rem 0;" />
+          <hr style="border: 0; border-top: 1px solid var(--border); width: 100%; margin: 0.25rem 0;" />
           <div><label for="room-input">Join with Meeting Code or Link</label><div class="row"><input id="room-input" type="text" placeholder="e.g. abc-defg-hij" style="flex: 1;" /><button id="join-btn">Join</button></div></div>
         </div>
         <div class="card">
@@ -317,6 +379,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
   <div id="call-view" class="hidden">
     <div id="banner-container"></div>
+    <video id="pip-video" autoplay muted playsinline style="position:fixed;width:2px;height:2px;opacity:0.01;pointer-events:none;bottom:0;right:0;"></video>
     <header id="call-header">
       <div class="call-info">
         <span class="call-title"><span id="call-title-text">Meeting</span><span id="host-badge" class="host-pill hidden">Host</span><span id="participant-count" class="count-pill">👥 1 / 100</span><span id="timer-pill" class="timer-pill hidden">⏱️ 00:00</span><button id="extend-time-btn" class="secondary hidden" type="button" style="padding: 2px 7px; font-size: 0.72rem;" title="Extend meeting by 15 minutes">+15m</button><span id="joining-count-pill" class="joining-pill hidden">⏳ 0</span><span id="recording-pill" class="rec-pill hidden">● REC</span></span>
@@ -336,6 +399,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       <div class="secondary-controls">
         <select id="view-mode-select" title="Switch Meeting View"><option value="grid">📐 Grid View</option><option value="speaker">🎤 Speaker View</option><option value="sidebar">◫ Sidebar View</option><option value="compact">🪪 Compact View</option></select>
         <select id="quality-mode-select" title="Video Quality & Smoothness"><option value="auto">🎥 Auto HD (Smooth)</option><option value="saver">📶 Data Saver (360p)</option></select>
+        <select id="call-theme-select" title="Appearance Mode"><option value="dark">🌙 Night</option><option value="system">🌓 System</option><option value="light">☀️ Light</option></select>
+        <button id="wake-lock-btn" class="secondary" type="button" title="Keep phone screen awake even when camera is off">🔆 Awake: On</button>
+        <button id="pip-btn" class="secondary" type="button" title="Open floating mini window (Picture-in-Picture)">🪟 Float Screen</button>
         <button id="snapshot-btn" class="secondary" title="Take clean snapshot of video stage">📸 Snapshot</button>
         <button id="wb-toggle-btn" class="secondary">🎨 Whiteboard</button>
         <button id="screen-btn" class="secondary">Share Screen</button>
@@ -349,7 +415,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     <div id="call-body">
       <div id="stage">
         <div id="view-swipe-toast" class="hidden"></div>
-        <div id="join-options-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="modal-avatar-preview" class="avatar-circle large">U</div><h2 id="join-modal-title">Choose Audio & Camera</h2><p>Select how you want to join this meeting. You can switch anytime on screen.</p><div class="join-choice-grid"><button id="modal-mic-btn" class="active join-choice-btn">🎤 Join with Microphone</button><button id="modal-speaker-btn" class="join-choice-btn">🔊 Join with Only Computer Speaker</button></div><hr style="border: 0; border-top: 1px solid #2b303b; width: 100%; margin: 0.2rem 0;" /><div class="row" style="justify-content: center; width: 100%;"><button id="modal-cam-btn" class="secondary" style="width: 100%;">📷 Enable Camera</button></div></div></div>
+        <div id="join-options-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="modal-avatar-preview" class="avatar-circle large">U</div><h2 id="join-modal-title">Choose Audio & Camera</h2><p>Select how you want to join this meeting. You can switch anytime on screen.</p><div class="join-choice-grid"><button id="modal-mic-btn" class="active join-choice-btn">🎤 Join with Microphone</button><button id="modal-speaker-btn" class="join-choice-btn">🔊 Join with Only Computer Speaker</button></div><hr style="border: 0; border-top: 1px solid var(--border); width: 100%; margin: 0.2rem 0;" /><div class="row" style="justify-content: center; width: 100%;"><button id="modal-cam-btn" class="secondary" style="width: 100%;">📷 Enable Camera</button></div></div></div>
         <div id="waiting-room-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="waiting-avatar-preview" class="avatar-circle large">U</div><div class="spinner"></div><h2>Waiting Room</h2><p id="waiting-room-status">Waiting for the meeting owner to let you in...</p><button id="cancel-waiting-btn" class="danger" style="width: 100%;">Leave Waiting Room</button></div></div>
         <div id="reaction-layer"></div>
         <div id="audio-container" class="hidden"></div>
@@ -371,7 +437,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
           <div id="reaction-bar"><button class="react-btn" data-emoji="👍">👍</button><button class="react-btn" data-emoji="❤️">❤️</button><button class="react-btn" data-emoji="😂">😂</button><button class="react-btn" data-emoji="👏">👏</button><button class="react-btn" data-emoji="🎉">🎉</button><button class="react-btn" data-emoji="😮">😮</button></div>
         </div>
       </div>
-      <aside id="participants-panel" class="side-panel hidden"><div class="panel-header"><span id="participants-panel-title">Participants (1)</span><button id="close-participants-btn" class="secondary" style="padding: 0.25rem 0.55rem;">✕</button></div><div style="padding: 0.65rem 0.75rem; border-bottom: 1px solid #2b303b;"><input id="participant-search" type="text" placeholder="Search participants..." style="padding: 0.45rem 0.65rem;" /></div><div id="participants-list" class="panel-scroll"></div></aside>
+      <aside id="participants-panel" class="side-panel hidden"><div class="panel-header"><span id="participants-panel-title">Participants (1)</span><button id="close-participants-btn" class="secondary" style="padding: 0.25rem 0.55rem;">✕</button></div><div style="padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border);"><input id="participant-search" type="text" placeholder="Search participants..." style="padding: 0.45rem 0.65rem;" /></div><div id="participants-list" class="panel-scroll"></div></aside>
       <aside id="chat-panel" class="side-panel hidden"><div class="chat-tabs-bar"><div class="chat-tabs"><button id="tab-public" class="chat-tab active-tab">Public <span id="badge-public" class="badge hidden">0</span></button><button id="tab-private" class="chat-tab">Personal (DM) <span id="badge-private" class="badge hidden">0</span></button></div><button id="close-chat-btn" class="secondary" style="margin: 0 0.5rem; padding: 0.25rem 0.55rem;">✕</button></div><div id="dm-bar" class="dm-bar hidden"><label for="dm-target" style="margin-bottom: 4px;">Send Private Message To:</label><select id="dm-target"></select></div><div id="public-messages" class="chat-messages"></div><div id="private-messages" class="chat-messages hidden"></div><div class="chat-input-row"><input id="chat-input" type="text" placeholder="Message everyone..." /><button id="send-chat-btn">Send</button></div></aside>
     </div>
   </div>
@@ -391,6 +457,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const avatarFileInput = document.getElementById("avatar-file-input");
     const uploadAvatarBtn = document.getElementById("upload-avatar-btn");
     const clearAvatarBtn = document.getElementById("clear-avatar-btn");
+    const lobbyThemeSelect = document.getElementById("lobby-theme-select");
     const roomInput = document.getElementById("room-input");
     const joinBtn = document.getElementById("join-btn");
     const instantBtn = document.getElementById("instant-btn");
@@ -422,6 +489,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const playerVideo = document.getElementById("player-video");
     const playerCloseBtn = document.getElementById("player-close-btn");
 
+    const pipVideo = document.getElementById("pip-video");
     const callTitleText = document.getElementById("call-title-text");
     const hostBadge = document.getElementById("host-badge");
     const participantCountEl = document.getElementById("participant-count");
@@ -439,6 +507,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const hostStopShareBtn = document.getElementById("host-stop-share-btn");
     const viewModeSelect = document.getElementById("view-mode-select");
     const qualityModeSelect = document.getElementById("quality-mode-select");
+    const callThemeSelect = document.getElementById("call-theme-select");
+    const wakeLockBtn = document.getElementById("wake-lock-btn");
+    const pipBtn = document.getElementById("pip-btn");
     const viewSwipeToast = document.getElementById("view-swipe-toast");
     const useMicBtn = document.getElementById("use-mic-btn");
     const useSpeakerBtn = document.getElementById("use-speaker-btn");
@@ -520,6 +591,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const seenMsgIds = new Set();
 
     let meetingEndsAtMs = null, serverTimeOffsetMs = 0, countdownTimer = null;
+    let themeMode = localStorage.getItem("vc_theme") || "dark";
+    let keepAwakeEnabled = localStorage.getItem("vc_keep_awake") !== "0";
+    let wakeLockSentinel = null, bgKeepaliveCtx = null, bgKeepaliveAudio = null;
+    let pipCanvas = null, pipWorker = null, pipWorkerUrl = null, pipDrawTimer = null, pipStream = null, isPipActive = false;
 
     let currentViewMode = localStorage.getItem("vc_view_mode") || "grid";
     let qualityMode = localStorage.getItem("vc_quality_mode") || "auto";
@@ -599,7 +674,210 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     };
     clearAvatarBtn.onclick = () => { localAvatar = ""; localStorage.removeItem("vc_avatar"); renderAvatarPreviews(); };
     renderAvatarPreviews();
+    const systemLightMq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+    function applyTheme(mode) {
+      if (!["dark", "system", "light"].includes(mode)) mode = "dark";
+      themeMode = mode;
+      try { localStorage.setItem("vc_theme", mode); } catch {}
+      if (lobbyThemeSelect) lobbyThemeSelect.value = mode;
+      if (callThemeSelect) callThemeSelect.value = mode;
+      const resolved = mode === "system" ? (systemLightMq?.matches ? "light" : "dark") : mode;
+      document.documentElement.setAttribute("data-theme", resolved);
+    }
+    lobbyThemeSelect.onchange = () => applyTheme(lobbyThemeSelect.value);
+    callThemeSelect.onchange = () => { applyTheme(callThemeSelect.value); controlsDock.classList.remove("more-open"); };
+    if (systemLightMq?.addEventListener) systemLightMq.addEventListener("change", () => { if (themeMode === "system") applyTheme("system"); });
+    applyTheme(themeMode);
+
+    async function requestWakeLock() {
+      if (!keepAwakeEnabled || !hasJoinedRoom || isLeavingCall || !("wakeLock" in navigator)) return;
+      try {
+        if (wakeLockSentinel && !wakeLockSentinel.released) return;
+        wakeLockSentinel = await navigator.wakeLock.request("screen");
+        wakeLockSentinel.addEventListener("release", () => { wakeLockSentinel = null; updateControlButtons(); });
+        updateControlButtons();
+      } catch {}
+    }
+    async function releaseWakeLock() {
+      if (wakeLockSentinel) { try { await wakeLockSentinel.release(); } catch {} wakeLockSentinel = null; }
+    }
+    wakeLockBtn.onclick = async () => {
+      keepAwakeEnabled = !keepAwakeEnabled;
+      try { localStorage.setItem("vc_keep_awake", keepAwakeEnabled ? "1" : "0"); } catch {}
+      if (keepAwakeEnabled) {
+        await requestWakeLock();
+        showNoticeBanner("wakeLock" in navigator ? "🔆 Screen standby kept ON (even with camera off)." : "⚠️ Screen Wake Lock not supported in this browser.", "wakeLock" in navigator ? "approved" : "denied", 3000);
+      } else {
+        await releaseWakeLock();
+        showNoticeBanner("🌙 Screen Wake Lock off (device can sleep normally).", "", 2500);
+      }
+      updateControlButtons();
+      controlsDock.classList.remove("more-open");
+    };
+
+    function startBackgroundKeepalive() {
+      if (!bgKeepaliveAudio) {
+        try {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          bgKeepaliveCtx = new AudioCtx();
+          if (bgKeepaliveCtx.state === "suspended") bgKeepaliveCtx.resume().catch(() => {});
+          const dest = bgKeepaliveCtx.createMediaStreamDestination();
+          const osc = bgKeepaliveCtx.createOscillator(), gain = bgKeepaliveCtx.createGain();
+          gain.gain.value = 0.00001;
+          osc.connect(gain); gain.connect(dest); osc.start();
+          bgKeepaliveAudio = document.createElement("audio");
+          bgKeepaliveAudio.playsInline = true;
+          bgKeepaliveAudio.srcObject = dest.stream;
+          bgKeepaliveAudio.play().catch(() => {});
+        } catch {}
+      }
+      updateMediaSession();
+    }
+    function stopBackgroundKeepalive() {
+      if (bgKeepaliveAudio) {
+        try { bgKeepaliveAudio.pause(); bgKeepaliveAudio.srcObject = null; } catch {}
+        bgKeepaliveAudio = null;
+      }
+      if (bgKeepaliveCtx) { bgKeepaliveCtx.close().catch(() => {}); bgKeepaliveCtx = null; }
+      if ("mediaSession" in navigator) { try { navigator.mediaSession.playbackState = "none"; } catch {} }
+    }
+    function updateMediaSession() {
+      if (!("mediaSession" in navigator)) return;
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentMeetingTitle || "Video Meeting",
+          artist: `${Object.keys(peerNames).length + 1} participant(s) • ${micEnabled ? "Mic On" : "Speaker Only"}`,
+          album: "LiveKit Conference"
+        });
+        navigator.mediaSession.playbackState = hasJoinedRoom ? "playing" : "none";
+        navigator.mediaSession.setActionHandler("play", () => {
+          if (bgKeepaliveCtx?.state === "suspended") bgKeepaliveCtx.resume().catch(() => {});
+          bgKeepaliveAudio?.play?.().catch(() => {});
+          audioContainer.querySelectorAll("audio").forEach(a => a.play().catch(() => {}));
+          if (pipVideo?.srcObject && pipVideo.paused) pipVideo.play().catch(() => {});
+        });
+        navigator.mediaSession.setActionHandler("pause", () => {});
+        try { navigator.mediaSession.setActionHandler("enterpictureinpicture", () => { if (hasJoinedRoom && !isPipActive) enterFloatingPip(); }); } catch {}
+      } catch {}
+    }
+
+    function drawPipFrame() {
+      if (!pipCanvas) return;
+      const ctx = pipCanvas.getContext("2d"), w = pipCanvas.width, h = pipCanvas.height;
+      ctx.fillStyle = "#0f1115"; ctx.fillRect(0, 0, w, h);
+
+      let drewMedia = false, statusLabel = `${currentMeetingTitle || "Meeting"} • ${Object.keys(peerNames).length + 1}/${maxUsersInRoom}`;
+      if (!screenStage.classList.contains("hidden") && !screenStageVideo.classList.contains("hidden") && screenStageVideo.videoWidth > 0) {
+        drawContained(ctx, screenStageVideo, 0, 0, w, h); drewMedia = true; statusLabel = screenStageLabel.textContent || "Screen Share";
+      } else if (isSharingScreen && localScreenMirrorVideo?.videoWidth > 0) {
+        drawContained(ctx, localScreenMirrorVideo, 0, 0, w, h); drewMedia = true; statusLabel = "Sharing your screen";
+      } else if (wbOpen && !whiteboardStage.classList.contains("hidden")) {
+        drawContained(ctx, wbCanvas, 0, 0, w, h); drewMedia = true; statusLabel = "Whiteboard";
+      } else {
+        const candidateIds = [];
+        if (pinnedTileId) candidateIds.push(pinnedTileId);
+        if (lastActiveSpeakerTileId && !candidateIds.includes(lastActiveSpeakerTileId)) candidateIds.push(lastActiveSpeakerTileId);
+        for (const id of tileOrder) { if (id !== "local" && !candidateIds.includes(id)) candidateIds.push(id); }
+        if (!candidateIds.includes("local")) candidateIds.push("local");
+
+        for (const tid of candidateIds) {
+          const tile = document.getElementById(`tile-${tid}`);
+          const vid = tile?.querySelector("video"), ph = tile?.querySelector(".placeholder");
+          if (vid && ph && ph.classList.contains("hidden") && vid.videoWidth > 0) {
+            drawContained(ctx, vid, 0, 0, w, h); drewMedia = true;
+            statusLabel = tile.querySelector(".label")?.textContent || statusLabel;
+            break;
+          }
+        }
+        if (!drewMedia) {
+          const spId = (lastActiveSpeakerTileId && document.getElementById(`tile-${lastActiveSpeakerTileId}`)) ? lastActiveSpeakerTileId : (tileOrder.find(id => id !== "local") || "local");
+          const spName = spId === "local" ? `${getDisplayName()} (You)` : (peerNames[spId] || "Waiting in call");
+          const isSpeaking = Boolean(document.getElementById(`tile-${spId}`)?.classList.contains("speaking"));
+          ctx.beginPath(); ctx.arc(w / 2, h / 2 - 18, 52, 0, Math.PI * 2);
+          ctx.fillStyle = isSpeaking ? "#16a34a" : "#2563eb"; ctx.fill();
+          if (isSpeaking) { ctx.lineWidth = 5; ctx.strokeStyle = "#4ade80"; ctx.stroke(); }
+          ctx.fillStyle = "#fff"; ctx.font = "bold 30px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText(spName.trim().slice(0, 2).toUpperCase(), w / 2, h / 2 - 18);
+          ctx.fillStyle = "#e4e4e7"; ctx.font = "600 20px system-ui, sans-serif";
+          ctx.fillText(isSpeaking ? `🎤 ${spName}` : spName, w / 2, h / 2 + 56);
+        }
+      }
+      ctx.fillStyle = "rgba(0, 0, 0, 0.72)"; ctx.fillRect(10, h - 38, Math.min(w - 20, 420), 28);
+      ctx.fillStyle = "#fff"; ctx.font = "600 15px system-ui, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      const timerTxt = !timerPill.classList.contains("hidden") ? `  ${timerPill.textContent}` : "";
+      ctx.fillText(`${statusLabel}${timerTxt}`.slice(0, 46), 18, h - 24);
+    }
+    function ensurePipStreamStarted() {
+      if (!pipCanvas) { pipCanvas = document.createElement("canvas"); pipCanvas.width = 640; pipCanvas.height = 360; }
+      drawPipFrame();
+      if (!pipStream) {
+        pipStream = pipCanvas.captureStream(15);
+        pipVideo.srcObject = pipStream;
+        pipVideo.autoPictureInPicture = true;
+      }
+      if (!pipWorker && !pipDrawTimer) {
+        try {
+          const code = `let t=null,ms=900; function run(){clearInterval(t);t=setInterval(()=>self.postMessage(0),ms);} self.onmessage=(e)=>{ if(e.data==="fast"){ms=66;run();} else if(e.data==="idle"){ms=900;run();} else if(e.data==="stop"){clearInterval(t);t=null;} };`;
+          pipWorkerUrl = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
+          pipWorker = new Worker(pipWorkerUrl); pipWorker.onmessage = drawPipFrame;
+          pipWorker.postMessage(isPipActive ? "fast" : "idle");
+        } catch { pipDrawTimer = setInterval(drawPipFrame, 120); }
+      }
+      pipVideo.play().catch(() => {});
+    }
+    function stopPipStream() {
+      if (pipWorker) { pipWorker.postMessage("stop"); pipWorker.terminate(); pipWorker = null; }
+      if (pipWorkerUrl) { URL.revokeObjectURL(pipWorkerUrl); pipWorkerUrl = null; }
+      if (pipDrawTimer) { clearInterval(pipDrawTimer); pipDrawTimer = null; }
+      if (pipStream) { pipStream.getTracks().forEach(t => t.stop()); pipStream = null; }
+      pipVideo.srcObject = null; isPipActive = false;
+    }
+    async function enterFloatingPip() {
+      if (!hasJoinedRoom) return;
+      ensurePipStreamStarted();
+      if (pipVideo.paused) { try { await pipVideo.play(); } catch {} }
+      try {
+        if (document.pictureInPictureElement === pipVideo) return;
+        if (document.pictureInPictureEnabled && typeof pipVideo.requestPictureInPicture === "function") {
+          await pipVideo.requestPictureInPicture();
+        } else if (typeof pipVideo.webkitSetPresentationMode === "function") {
+          pipVideo.webkitSetPresentationMode("picture-in-picture");
+          isPipActive = true; updateControlButtons();
+        } else {
+          showNoticeBanner("⚠️ Floating window is not supported by this browser (background audio still works).", "denied", 4500);
+        }
+      } catch {
+        showNoticeBanner("⚠️ Could not open floating window. Tap 'Float Screen' again after audio/video starts.", "denied", 3500);
+      }
+    }
+    async function exitFloatingPip() {
+      try {
+        if (document.pictureInPictureElement === pipVideo && document.exitPictureInPicture) await document.exitPictureInPicture();
+        else if (typeof pipVideo.webkitSetPresentationMode === "function" && pipVideo.webkitPresentationMode === "picture-in-picture") pipVideo.webkitSetPresentationMode("inline");
+      } catch {}
+      isPipActive = false; updateControlButtons();
+    }
+    pipVideo.addEventListener("enterpictureinpicture", () => { isPipActive = true; pipWorker?.postMessage("fast"); updateControlButtons(); });
+    pipVideo.addEventListener("leavepictureinpicture", () => { isPipActive = false; pipWorker?.postMessage("idle"); updateControlButtons(); });
+    pipBtn.onclick = async () => { controlsDock.classList.remove("more-open"); if (isPipActive) await exitFloatingPip(); else await enterFloatingPip(); };
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        if (hasJoinedRoom && keepAwakeEnabled) requestWakeLock();
+        if (bgKeepaliveCtx?.state === "suspended") bgKeepaliveCtx.resume().catch(() => {});
+        if (recAudioCtx?.state === "suspended") recAudioCtx.resume().catch(() => {});
+      } else if (hasJoinedRoom) {
+        updateMediaSession();
+        if (bgKeepaliveCtx?.state === "suspended") bgKeepaliveCtx.resume().catch(() => {});
+        audioContainer.querySelectorAll("audio").forEach((a) => { if (a.paused) a.play().catch(() => {}); });
+      }
+    });
+
     function formatDurationLabel(mins) {
+      const m = Number(mins || 0);
+      if (!m || m <= 0) return "Unlimited";
+      if (m >= 60 && m %
+      function formatDurationLabel(mins) {
       const m = Number(mins || 0);
       if (!m || m <= 0) return "Unlimited";
       if (m >= 60 && m % 60 === 0) return `${m / 60} hr`;
@@ -998,6 +1276,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       joiningCountPill.textContent = `⏳ ${effectiveWaiting} pending`;
       joiningBtnBadge.classList.toggle("hidden", effectiveWaiting === 0);
       joiningBtnBadge.textContent = `${effectiveWaiting}`;
+      updateMediaSession();
     }
 
     function sendScreenDecision(requesterId, approved) {
@@ -1664,13 +1943,13 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         const lp = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Microphone);
         if (lp?.track?.mediaStreamTrack) startLocalVoiceMonitor(lp.track.mediaStreamTrack);
         syncAllAudioToRecorder(); if (captionsEnabled) { startSpeechRecognition(); syncWhisperAudioTracks(); }
-        updateControlButtons(); return true;
+        updateControlButtons(); updateMediaSession(); return true;
       } catch (err) { handleMediaError(err, "microphone"); micEnabled = false; updateControlButtons(); return false; }
     }
     async function useSpeakerOnly() {
       wantMicOnJoin = false; micEnabled = false; stopLocalVoiceMonitor(); stopSpeechRecognition();
       if (lkRoom) await lkRoom.localParticipant.setMicrophoneEnabled(false);
-      if (captionsEnabled) startWhisperCaptions(); syncWhisperAudioTracks(); updateControlButtons();
+      if (captionsEnabled) startWhisperCaptions(); syncWhisperAudioTracks(); updateControlButtons(); updateMediaSession();
     }
 
     async function enableCamera() {
@@ -1733,7 +2012,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (track.mediaStreamTrack) attachAudioTrackToRecorder(track.mediaStreamTrack);
       syncWhisperAudioTracks();
     }
-
     async function connectLiveKit(url, token) {
       if (typeof LivekitClient === "undefined") { showNoticeBanner("❌ LiveKit client script failed to load.", "denied", 0); return; }
       if (lkRoom) { try { await lkRoom.disconnect(); } catch {} lkRoom = null; }
@@ -1824,6 +2102,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
       }
       pruneGhostTiles(); applySubscriptionEfficiency(); refreshDmDropdown(); renderParticipantsList();
+      if (keepAwakeEnabled) requestWakeLock();
       if (isHost && currentHostId === clientId && autoRecordOnJoin && !isRecordingLocally) setTimeout(() => { if (hasJoinedRoom && isHost && currentHostId === clientId && !isRecordingLocally) startHostRecording(); }, 400);
     }
 
@@ -1833,6 +2112,12 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       muteSpeakerBtn.innerHTML = speakerMuted ? '🔇 <span class="hide-sm">Speaker Muted</span>' : '🔊 <span class="hide-sm">Mute Speaker</span>';
       muteSpeakerBtn.classList.toggle("danger", speakerMuted);
       muteSpeakerBtn.classList.toggle("secondary", !speakerMuted);
+      wakeLockBtn.textContent = keepAwakeEnabled ? "🔆 Awake: On" : "🌙 Awake: Off";
+      wakeLockBtn.classList.toggle("active", keepAwakeEnabled);
+      wakeLockBtn.classList.toggle("secondary", !keepAwakeEnabled);
+      pipBtn.textContent = isPipActive ? "🪟 Exit Float" : "🪟 Float Screen";
+      pipBtn.classList.toggle("active", isPipActive);
+      pipBtn.classList.toggle("secondary", !isPipActive);
       camBtn.disabled = false; camBtn.innerHTML = camEnabled ? '📷 <span class="hide-sm">Disable </span>Cam<span class="hide-sm">era</span>' : '📷 <span class="hide-sm">Enable </span>Cam<span class="hide-sm">era</span>';
       camBtn.classList.toggle("active", camEnabled); camBtn.classList.toggle("secondary", !camEnabled);
       modalCamBtn.textContent = camEnabled ? "📷 Disable Camera" : "📷 Enable Camera"; modalCamBtn.classList.toggle("active", camEnabled); modalCamBtn.classList.toggle("secondary", !camEnabled);
@@ -1870,8 +2155,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     };
     camBtn.onclick = async () => { if (camEnabled) await disableCamera(); else await enableCamera(); };
     modalCamBtn.onclick = async () => { if (camEnabled) await disableCamera(); else await enableCamera(); };
-    modalMicBtn.onclick = async () => { await enableMicrophone(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); };
-    modalSpeakerBtn.onclick = async () => { await useSpeakerOnly(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); };
+    modalMicBtn.onclick = async () => { startBackgroundKeepalive(); ensurePipStreamStarted(); await enableMicrophone(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); requestWakeLock(); };
+    modalSpeakerBtn.onclick = async () => { startBackgroundKeepalive(); ensurePipStreamStarted(); await useSpeakerOnly(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); requestWakeLock(); };
     cancelWaitingBtn.onclick = () => { leaveBtn.click(); };
     hostPolicyBtn.onclick = () => { if (isHost) sendSignal({ type: "set_screen_policy", require_approval: !requireScreenApproval }); };
     hostStopShareBtn.onclick = () => { if (isHost) sendSignal({ type: "host_stop_share" }); controlsDock.classList.remove("more-open"); };
@@ -1912,6 +2197,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     function connectToRoomSocket(isReconnect = false) {
       if (hasJoinedRoom && !isReconnect) return;
       hasJoinedRoom = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer);
+      if (keepAwakeEnabled) requestWakeLock();
+      updateMediaSession();
       const hostKey = localStorage.getItem(`vc_host_key_${currentRoomId}`) || sessionStorage.getItem(`vc_host_key_${currentRoomId}`) || "";
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl = `${protocol}//${location.host}/ws/${encodeURIComponent(currentRoomId)}/${clientId}?name=${encodeURIComponent(getDisplayName())}&host_key=${encodeURIComponent(hostKey)}`;
@@ -2008,6 +2295,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     leaveBtn.onclick = async () => {
       isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); wsPingTimer = null;
       syncMeetingCountdown(null, null);
+      await exitFloatingPip(); stopPipStream(); stopBackgroundKeepalive(); await releaseWakeLock();
       clearTimeout(participantsRenderTimer); participantsRenderTimer = null; clearTimeout(dmRefreshTimer); dmRefreshTimer = null;
       if (isRecordingLocally) await stopHostRecording(true);
       stopLocalVoiceMonitor(); stopSpeechRecognition(); stopWhisperCaptions(); captionsEnabled = false; clearTimeout(captionClearTimer); captionBar.classList.add("hidden");
@@ -2033,6 +2321,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
     function handlePageExit() {
       isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer);
+      releaseWakeLock(); stopBackgroundKeepalive(); stopPipStream();
       if (ws) try { ws.close(); } catch {}
       if (lkRoom) try { lkRoom.disconnect(); } catch {}
     }
