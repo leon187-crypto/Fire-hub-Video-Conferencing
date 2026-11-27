@@ -4,7 +4,7 @@ import os
 import secrets
 import sqlite3
 import string
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -15,9 +15,10 @@ from pydantic import BaseModel
 app = FastAPI()
 
 BASE_DIR = Path(__file__).parent
-DB_PATH = BASE_DIR / "meetings.db"
-RECORDINGS_DIR = BASE_DIR / "recordings"
-RECORDINGS_DIR.mkdir(exist_ok=True)
+DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "meetings.db")))
+RECORDINGS_DIR = Path(os.getenv("RECORDINGS_DIR", str(BASE_DIR / "recordings")))
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_USERS_PER_ROOM = 100
 MAX_WB_STROKES = 2500
@@ -85,6 +86,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .call-title { font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
     .host-pill { font-size: 0.7rem; background: #7c3aed; color: #fff; padding: 2px 7px; border-radius: 999px; font-weight: 600; }
     .count-pill { font-size: 0.75rem; background: #272c38; color: #e4e4e7; padding: 2px 8px; border-radius: 999px; }
+    .timer-pill { font-size: 0.75rem; background: #1e293b; color: #93c5fd; border: 1px solid #3b82f6; padding: 2px 8px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .timer-pill.warning { background: #451a03; color: #fde68a; border-color: #f59e0b; }
+    .timer-pill.danger { background: #450a0a; color: #fecaca; border-color: #ef4444; animation: pulseRec 1.2s infinite; }
     .joining-pill { font-size: 0.73rem; background: #b45309; color: #fff; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
     .rec-pill { font-size: 0.72rem; background: #dc2626; color: #fff; padding: 2px 9px; border-radius: 999px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; animation: pulseRec 1.4s infinite; }
     @keyframes pulseRec { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
@@ -285,6 +289,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         <div class="card">
           <h2>Start or Join a Meeting</h2>
           <div><label for="instant-join-mode">Room Joining Permission</label><select id="instant-join-mode"><option value="direct">Direct Join (No Owner Approval)</option><option value="approval">Need Owner's Approval (Waiting Room)</option></select></div>
+          <div><label for="instant-duration">Meeting Duration</label><select id="instant-duration"><option value="0">Unlimited (No Time Limit)</option><option value="15">15 Minutes</option><option value="30">30 Minutes</option><option value="45">45 Minutes</option><option value="60">1 Hour (60 Minutes)</option><option value="90">1.5 Hours (90 Minutes)</option><option value="120">2 Hours (120 Minutes)</option><option value="180">3 Hours (180 Minutes)</option></select></div>
           <label class="checkbox-row"><input id="instant-approval-chk" type="checkbox" checked /> Require host approval to share screen</label>
           <label class="checkbox-row"><input id="instant-record-chk" type="checkbox" /> Record this meeting automatically</label>
           <button id="instant-btn" class="active">New Instant Meeting</button>
@@ -295,6 +300,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
           <h2>Schedule a Meeting</h2>
           <div><label for="sched-title">Meeting Title</label><input id="sched-title" type="text" placeholder="e.g. All-Hands (100 Users)" /></div>
           <div><label for="sched-time">Date & Time</label><input id="sched-time" type="datetime-local" /></div>
+          <div><label for="sched-duration">Meeting Duration</label><select id="sched-duration"><option value="0">Unlimited (No Time Limit)</option><option value="15">15 Minutes</option><option value="30">30 Minutes</option><option value="45">45 Minutes</option><option value="60">1 Hour (60 Minutes)</option><option value="90">1.5 Hours (90 Minutes)</option><option value="120">2 Hours (120 Minutes)</option><option value="180">3 Hours (180 Minutes)</option></select></div>
           <div><label for="sched-join-mode">Room Joining Permission</label><select id="sched-join-mode"><option value="direct">Direct Join (No Owner Approval)</option><option value="approval">Need Owner's Approval (Waiting Room)</option></select></div>
           <label class="checkbox-row"><input id="sched-approval-chk" type="checkbox" checked /> Require host approval to share screen</label>
           <label class="checkbox-row"><input id="sched-record-chk" type="checkbox" /> Record this meeting automatically</label>
@@ -313,7 +319,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     <div id="banner-container"></div>
     <header id="call-header">
       <div class="call-info">
-        <span class="call-title"><span id="call-title-text">Meeting</span><span id="host-badge" class="host-pill hidden">Host</span><span id="participant-count" class="count-pill">👥 1 / 100</span><span id="joining-count-pill" class="joining-pill hidden">⏳ 0</span><span id="recording-pill" class="rec-pill hidden">● REC</span></span>
+        <span class="call-title"><span id="call-title-text">Meeting</span><span id="host-badge" class="host-pill hidden">Host</span><span id="participant-count" class="count-pill">👥 1 / 100</span><span id="timer-pill" class="timer-pill hidden">⏱️ 00:00</span><button id="extend-time-btn" class="secondary hidden" type="button" style="padding: 2px 7px; font-size: 0.72rem;" title="Extend meeting by 15 minutes">+15m</button><span id="joining-count-pill" class="joining-pill hidden">⏳ 0</span><span id="recording-pill" class="rec-pill hidden">● REC</span></span>
         <span class="call-sub" id="call-sub"></span>
       </div>
       <div class="header-actions"><button id="copy-call-link-btn" class="secondary">🔗 <span class="hide-sm">Copy Link</span></button><button id="leave-btn" class="danger">Leave</button></div>
@@ -389,6 +395,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const joinBtn = document.getElementById("join-btn");
     const instantBtn = document.getElementById("instant-btn");
     const instantJoinMode = document.getElementById("instant-join-mode");
+    const instantDuration = document.getElementById("instant-duration");
     const instantApprovalChk = document.getElementById("instant-approval-chk");
     const instantRecordChk = document.getElementById("instant-record-chk");
     const directRoomCard = document.getElementById("direct-room-card");
@@ -399,6 +406,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const directCopyBtn = document.getElementById("direct-copy-btn");
     const schedTitle = document.getElementById("sched-title");
     const schedTime = document.getElementById("sched-time");
+    const schedDuration = document.getElementById("sched-duration");
     const schedJoinMode = document.getElementById("sched-join-mode");
     const schedApprovalChk = document.getElementById("sched-approval-chk");
     const schedRecordChk = document.getElementById("sched-record-chk");
@@ -417,6 +425,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const callTitleText = document.getElementById("call-title-text");
     const hostBadge = document.getElementById("host-badge");
     const participantCountEl = document.getElementById("participant-count");
+    const timerPill = document.getElementById("timer-pill");
+    const extendTimeBtn = document.getElementById("extend-time-btn");
     const joiningCountPill = document.getElementById("joining-count-pill");
     const recordingPill = document.getElementById("recording-pill");
     const callSub = document.getElementById("call-sub");
@@ -500,18 +510,17 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const chatInput = document.getElementById("chat-input");
     const sendChatBtn = document.getElementById("send-chat-btn");
 
-    let clientId = "";
-    try { clientId = sessionStorage.getItem("vc_client_id") || ""; } catch {}
-    if (!clientId) {
-      clientId = Math.random().toString(36).substring(2, 10);
-      try { sessionStorage.setItem("vc_client_id", clientId); } catch {}
-    }
+    // Fresh clientId per page load so browser refresh always triggers host approval if enabled
+    const clientId = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
+    let rejoinToken = "";
 
     let isMainHostServer = false, currentRoomId = null, currentMeetingTitle = "Meeting", maxUsersInRoom = 100;
     let ws = null, wsPingTimer = null, wsReconnectTimer = null, isLeavingCall = false, lkRoom = null, activeScreenPublication = null;
     let peerNames = {}, peerAvatars = {}, waitingUsers = {}, pendingScreenRequests = {};
     let waitingCount = 0, currentHostId = null, tileOrder = ["local"], currentPage = 1, tileReactionTimers = {};
     const seenMsgIds = new Set();
+
+    let meetingEndsAtMs = null, serverTimeOffsetMs = 0, countdownTimer = null;
 
     let currentViewMode = localStorage.getItem("vc_view_mode") || "grid";
     let qualityMode = localStorage.getItem("vc_quality_mode") || "auto";
@@ -591,6 +600,61 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     };
     clearAvatarBtn.onclick = () => { localAvatar = ""; localStorage.removeItem("vc_avatar"); renderAvatarPreviews(); };
     renderAvatarPreviews();
+
+    function formatDurationLabel(mins) {
+      const m = Number(mins || 0);
+      if (!m || m <= 0) return "Unlimited";
+      if (m >= 60 && m % 60 === 0) return `${m / 60} hr`;
+      if (m > 60) return `${Math.floor(m / 60)}h ${m % 60}m`;
+      return `${m} min`;
+    }
+
+    function syncMeetingCountdown(endsAtIso, serverNowIso) {
+      if (serverNowIso) {
+        const sMs = Date.parse(serverNowIso);
+        if (!isNaN(sMs)) serverTimeOffsetMs = sMs - Date.now();
+      }
+      if (!endsAtIso) {
+        meetingEndsAtMs = null;
+        clearInterval(countdownTimer); countdownTimer = null;
+        timerPill.classList.add("hidden");
+        extendTimeBtn.classList.add("hidden");
+        return;
+      }
+      const parsed = Date.parse(endsAtIso);
+      if (isNaN(parsed)) return;
+      meetingEndsAtMs = parsed;
+      updateCountdownDisplay();
+      if (!countdownTimer) countdownTimer = setInterval(updateCountdownDisplay, 500);
+    }
+
+    function updateCountdownDisplay() {
+      if (!meetingEndsAtMs) { timerPill.classList.add("hidden"); extendTimeBtn.classList.add("hidden"); return; }
+      const remSec = Math.max(0, Math.ceil((meetingEndsAtMs - (Date.now() + serverTimeOffsetMs)) / 1000));
+      const hrs = Math.floor(remSec / 3600), mins = Math.floor((remSec % 3600) / 60), secs = remSec % 60;
+      const pad = (n) => String(n).padStart(2, "0");
+      timerPill.textContent = hrs > 0 ? `⏱️ ${hrs}:${pad(mins)}:${pad(secs)}` : `⏱️ ${pad(mins)}:${pad(secs)}`;
+      timerPill.classList.remove("hidden", "warning", "danger");
+      if (remSec <= 60) timerPill.classList.add("danger");
+      else if (remSec <= 300) timerPill.classList.add("warning");
+      extendTimeBtn.classList.toggle("hidden", !(isHost && currentHostId === clientId));
+    }
+
+    extendTimeBtn.onclick = () => {
+      if (isHost && currentHostId === clientId) sendSignal({ type: "extend_meeting", minutes: 15 });
+    };
+
+    function showTimeWarningBanner(minutesLeft) {
+      document.getElementById("time-warning-banner")?.remove();
+      const card = document.createElement("div"); card.id = "time-warning-banner"; card.className = "banner-card waiting-req";
+      const strictHost = Boolean(isHost && currentHostId === clientId);
+      card.innerHTML = `<span class="banner-text">⏳ <b>${minutesLeft} minute${minutesLeft > 1 ? "s" : ""} remaining</b> in this meeting.</span>${strictHost ? `<div class="row" style="flex-shrink:0;"><button class="active extend-banner-btn" style="padding:0.4rem 0.7rem;">+15 min</button></div>` : ""}`;
+      if (strictHost) {
+        card.querySelector(".extend-banner-btn").onclick = () => { sendSignal({ type: "extend_meeting", minutes: 15 }); card.remove(); };
+      }
+      bannerContainer.appendChild(card);
+      setTimeout(() => card.remove(), 12000);
+    }
 
     function downloadCanvasPng(canvas, filename) {
       canvas.toBlob((blob) => {
@@ -1394,7 +1458,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         for (const m of meetings) {
           const item = document.createElement("div"); item.className = "meeting-item";
           const link = getMeetingUrl(m.id);
-          item.innerHTML = `<div class="meeting-meta"><span class="meeting-title">${escapeHtml(m.title)}</span><span class="meeting-sub">Code: <b>${escapeHtml(m.id)}</b> • ${escapeHtml(formatDateTime(m.scheduled_at))} • ${m.require_join_approval ? "Waiting Room" : "Direct Join"} • ${m.require_screen_approval ? "Screen Approval" : "Open Share"}${m.record_meeting ? " • Auto-Record" : ""}</span></div><div class="row"><button class="secondary copy-m-btn">Copy Link</button><button class="join-m-btn">Join</button><button class="danger del-m-btn">Delete</button></div>`;
+          item.innerHTML = `<div class="meeting-meta"><span class="meeting-title">${escapeHtml(m.title)}</span><span class="meeting-sub">Code: <b>${escapeHtml(m.id)}</b> • ${escapeHtml(formatDateTime(m.scheduled_at))} • ⏱️ ${escapeHtml(formatDurationLabel(m.duration_minutes))} • ${m.require_join_approval ? "Waiting Room" : "Direct Join"} • ${m.require_screen_approval ? "Screen Approval" : "Open Share"}${m.record_meeting ? " • Auto-Record" : ""}</span></div><div class="row"><button class="secondary copy-m-btn">Copy Link</button><button class="join-m-btn">Join</button><button class="danger del-m-btn">Delete</button></div>`;
           item.querySelector(".copy-m-btn").onclick = (e) => copyText(link, e.target);
           item.querySelector(".join-m-btn").onclick = () => enterMeetingScreen(m.id, m.title);
           item.querySelector(".del-m-btn").onclick = async () => { await fetch(`/api/meetings/${encodeURIComponent(m.id)}`, { method: "DELETE" }); loadMeetings(); };
@@ -1404,7 +1468,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     }
 
     instantBtn.onclick = async () => {
-      const res = await fetch("/api/meetings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: `${getDisplayName()}'s Meeting`, host_name: getDisplayName(), scheduled_at: null, require_join_approval: instantJoinMode.value === "approval", require_screen_approval: instantApprovalChk.checked, record_meeting: instantRecordChk.checked }) });
+      const res = await fetch("/api/meetings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: `${getDisplayName()}'s Meeting`, host_name: getDisplayName(), scheduled_at: null, duration_minutes: Number(instantDuration.value || 0), require_join_approval: instantJoinMode.value === "approval", require_screen_approval: instantApprovalChk.checked, record_meeting: instantRecordChk.checked }) });
       const meeting = await res.json();
       if (meeting.host_key) localStorage.setItem(`vc_host_key_${meeting.id}`, meeting.host_key);
       history.pushState({}, "", `/room/${meeting.id}`);
@@ -1413,10 +1477,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     schedBtn.onclick = async () => {
       const title = schedTitle.value.trim() || "Scheduled Meeting", dtVal = schedTime.value;
       if (!dtVal) return alert("Please pick a date and time to schedule.");
-      const res = await fetch("/api/meetings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, host_name: getDisplayName(), scheduled_at: new Date(dtVal).toISOString(), require_join_approval: schedJoinMode.value === "approval", require_screen_approval: schedApprovalChk.checked, record_meeting: schedRecordChk.checked }) });
+      const res = await fetch("/api/meetings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, host_name: getDisplayName(), scheduled_at: new Date(dtVal).toISOString(), duration_minutes: Number(schedDuration.value || 0), require_join_approval: schedJoinMode.value === "approval", require_screen_approval: schedApprovalChk.checked, record_meeting: schedRecordChk.checked }) });
       const meeting = await res.json();
       if (meeting.host_key) localStorage.setItem(`vc_host_key_${meeting.id}`, meeting.host_key);
-      schedLinkBox.textContent = `Scheduled! Link: ${getMeetingUrl(meeting.id)}`; schedResult.classList.remove("hidden"); schedTitle.value = "";
+      schedLinkBox.textContent = `Scheduled (${formatDurationLabel(meeting.duration_minutes)})! Link: ${getMeetingUrl(meeting.id)}`; schedResult.classList.remove("hidden"); schedTitle.value = "";
       if (isMainHostServer) loadMeetings();
     };
     refreshListBtn.onclick = loadMeetings; refreshRecBtn.onclick = loadRecordings;
@@ -1428,15 +1492,18 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       const roomId = decodeURIComponent(match[1]), meeting = await (await fetch(`/api/meetings/${encodeURIComponent(roomId)}`)).json();
       directRoomCard.classList.remove("hidden"); directRoomTitle.textContent = meeting.title || `Room ${roomId}`;
       const jt = meeting.require_join_approval ? "Waiting Room Enabled" : "Direct Join";
-      directRoomTime.textContent = meeting.scheduled_at ? `Scheduled for: ${formatDateTime(meeting.scheduled_at)} • ${jt}` : `Meeting Code: ${roomId} • ${jt}`;
+      const dt = formatDurationLabel(meeting.duration_minutes);
+      directRoomTime.textContent = meeting.scheduled_at ? `Scheduled for: ${formatDateTime(meeting.scheduled_at)} • Duration: ${dt} • ${jt}` : `Meeting Code: ${roomId} • Duration: ${dt} • ${jt}`;
       directRoomLink.textContent = getMeetingUrl(roomId);
       directJoinBtn.onclick = () => enterMeetingScreen(roomId, meeting.title);
       directCopyBtn.onclick = (e) => copyText(getMeetingUrl(roomId), e.target);
     }
-    joinBtn.onclick = () => {
+    joinBtn.onclick = async () => {
       const val = roomInput.value.trim(); if (!val) return alert("Enter a meeting code or room name.");
-      const match = val.match(/\/room\/([^/?#]+)/), roomId = match ? match[1] : val;
-      history.pushState({}, "", `/room/${encodeURIComponent(roomId)}`); enterMeetingScreen(roomId, `Room ${roomId}`);
+      const match = val.match(/\/room\/([^/?#]+)/), roomId = decodeURIComponent(match ? match[1] : val);
+      let title = `Room ${roomId}`;
+      try { const m = await (await fetch(`/api/meetings/${encodeURIComponent(roomId)}`)).json(); if (m?.title) title = m.title; } catch {}
+      history.pushState({}, "", `/room/${encodeURIComponent(roomId)}`); enterMeetingScreen(roomId, title);
     };
 
     function refreshDmDropdown() {
@@ -1773,6 +1840,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       modalCamBtn.textContent = camEnabled ? "📷 Disable Camera" : "📷 Enable Camera"; modalCamBtn.classList.toggle("active", camEnabled); modalCamBtn.classList.toggle("secondary", !camEnabled);
       ccBtn.textContent = captionsEnabled ? "💬 CC: On" : "💬 CC: Off"; ccBtn.classList.toggle("active", captionsEnabled); ccBtn.classList.toggle("secondary", !captionsEnabled);
       hostBadge.classList.toggle("hidden", !strictHost); hostRecordBtn.classList.toggle("hidden", !strictHost);
+      extendTimeBtn.classList.toggle("hidden", !(strictHost && meetingEndsAtMs));
       if (strictHost) { hostRecordBtn.textContent = isRecordingLocally ? "⏹ Stop Recording" : "🔴 Record"; hostRecordBtn.classList.toggle("danger", isRecordingLocally); hostRecordBtn.classList.toggle("secondary", !isRecordingLocally); }
       hostJoinPolicyBtn.classList.toggle("hidden", !strictHost);
       if (strictHost) { hostJoinPolicyBtn.textContent = requireJoinApproval ? "Entry: Owner Approval" : "Entry: Direct Join"; hostJoinPolicyBtn.classList.toggle("warning", requireJoinApproval); hostJoinPolicyBtn.classList.toggle("active", !requireJoinApproval); }
@@ -1828,719 +1896,4 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     function sendSignal(payload) { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)); }
 
     function enterMeetingScreen(roomId, title) {
-      currentRoomId = roomId; currentMeetingTitle = title || `Room ${roomId}`;
-      isLeavingCall = false; wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; speakerMuted = false; hasJoinedRoom = false;
-      waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null;
-      pinnedTileId = null; lastActiveSpeakerTileId = null; lastSpeakingKey = ""; lkSpeakingIds.clear(); seenMsgIds.clear();
-      wbOpen = false; wbLocked = false; wbHistory = []; redrawWhiteboard();
-      videoGrid.innerHTML = ""; tileOrder = ["local"]; currentPage = 1;
-      renderAvatarPreviews(); lobbyView.classList.add("hidden"); callView.classList.remove("hidden");
-      callTitleText.textContent = currentMeetingTitle; callSub.textContent = `Code: ${roomId} • Link: ${getMeetingUrl(roomId)}`;
-      joinModalTitle.textContent = `Join "${currentMeetingTitle}"`;
-      refreshDmDropdown(); ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar);
-      setTilePlaceholder("local", false, "Camera Disabled"); applyViewMode(currentViewMode); updateControlButtons();
-      joinOptionsOverlay.classList.remove("hidden");
-    }
-
-    function connectToRoomSocket(isReconnect = false) {
-      if (hasJoinedRoom && !isReconnect) return;
-      hasJoinedRoom = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer);
-      const hostKey = localStorage.getItem(`vc_host_key_${currentRoomId}`) || sessionStorage.getItem(`vc_host_key_${currentRoomId}`) || "";
-      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${location.host}/ws/${encodeURIComponent(currentRoomId)}/${clientId}?name=${encodeURIComponent(getDisplayName())}&host_key=${encodeURIComponent(hostKey)}`;
-      const sock = new WebSocket(wsUrl); ws = sock;
-
-      sock.onopen = () => {
-        clearInterval(wsPingTimer);
-        wsPingTimer = setInterval(() => { if (ws === sock && sock.readyState === WebSocket.OPEN) sock.send(JSON.stringify({ type: "ping" })); }, 20000);
-        sock.send(JSON.stringify({ type: "join_room", name: getDisplayName(), avatar: localAvatar }));
-      };
-      sock.onclose = () => {
-        if (ws === sock) {
-          clearInterval(wsPingTimer); wsPingTimer = null;
-          if (hasJoinedRoom && !isLeavingCall) wsReconnectTimer = setTimeout(() => connectToRoomSocket(true), 1500);
-        }
-      };
-
-      sock.onmessage = async (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "pong") return;
-        if (msg.type === "room_full") { isLeavingCall = true; alert(msg.reason || "Room is full."); leaveBtn.click(); return; }
-        if (msg.type === "waiting_room") { waitingRoomOverlay.classList.remove("hidden"); waitingRoomStatus.textContent = msg.host_present ? "Waiting for the meeting owner to let you in..." : "Waiting for the meeting owner to join and let you in..."; return; }
-        if (msg.type === "join_denied") { isLeavingCall = true; const r = msg.reason || "The meeting owner declined your request to join."; await leaveBtn.onclick(); showNoticeBanner(`❌ ${r}`, "denied", 5000); alert(r); return; }
-
-        if (msg.type === "waiting_user_joined") {
-          if (isHost) { waitingUsers[msg.user.id] = msg.user; waitingCount = Object.keys(waitingUsers).length; playWaitingKnockSound(); showWaitingUserBanner(msg.user); scheduleParticipantsRender(); }
-        } else if (msg.type === "waiting_list") {
-          if (isHost && msg.users?.length) { msg.users.forEach(u => { waitingUsers[u.id] = u; showWaitingUserBanner(u); }); waitingCount = Object.keys(waitingUsers).length; playWaitingKnockSound(); scheduleParticipantsRender(); }
-        } else if (msg.type === "waiting_user_left") {
-          delete waitingUsers[msg.sender]; waitingCount = Object.keys(waitingUsers).length; document.getElementById(`wait-${msg.sender}`)?.remove(); scheduleParticipantsRender();
-        } else if (msg.type === "waiting_count_update") {
-          waitingCount = msg.waiting_count || 0; scheduleParticipantsRender();
-        } else if (msg.type === "all_users") {
-          waitingRoomOverlay.classList.add("hidden");
-          isHost = Boolean(msg.is_host); currentHostId = msg.host_id || null;
-          if (isHost && msg.host_secret) { try { sessionStorage.setItem(`vc_host_key_${currentRoomId}`, msg.host_secret); } catch {} }
-          requireScreenApproval = Boolean(msg.require_screen_approval); requireJoinApproval = Boolean(msg.require_join_approval); autoRecordOnJoin = Boolean(msg.auto_record);
-          activeSharer = msg.active_sharer || null; activeSharerName = msg.active_sharer_name || null; waitingCount = msg.waiting_count || 0; maxUsersInRoom = msg.max_users || 100;
-          wbOpen = Boolean(msg.whiteboard_open); wbLocked = Boolean(msg.whiteboard_locked); wbHistory = Array.isArray(msg.whiteboard_strokes) ? msg.whiteboard_strokes : []; redrawWhiteboard();
-          updateRecordingUI(Boolean(msg.is_recording), msg.recording_by || "Host");
-          if (msg.is_recording && !isReconnect) showNoticeBanner("🔴 Notice: This meeting is currently being recorded by the host.", "denied", 6000);
-
-          const validIds = new Set(msg.users.map(u => u.id));
-          for (const tid of [...tileOrder]) { if (tid !== "local" && !validIds.has(tid) && !lkRoom?.remoteParticipants?.has(tid)) { delete peerNames[tid]; delete peerAvatars[tid]; removeVideoTile(tid); } }
-          for (const user of msg.users) { peerNames[user.id] = user.name; peerAvatars[user.id] = user.avatar || ""; ensureVideoTile(user.id, user.name, true, user.avatar || ""); }
-          refreshDmDropdown(); updateControlButtons();
-          if (msg.livekit_url && msg.livekit_token && (!lkRoom || lkRoom.state === "disconnected")) await connectLiveKit(msg.livekit_url, msg.livekit_token);
-        } else if (msg.type === "room_policy") {
-          isHost = msg.host_id === clientId; currentHostId = msg.host_id || null;
-          requireScreenApproval = Boolean(msg.require_screen_approval); requireJoinApproval = Boolean(msg.require_join_approval);
-          activeSharer = msg.active_sharer || null; activeSharerName = msg.active_sharer_name || null; waitingCount = msg.waiting_count ?? waitingCount;
-          if (typeof msg.whiteboard_open === "boolean") wbOpen = msg.whiteboard_open;
-          if (typeof msg.whiteboard_locked === "boolean") wbLocked = msg.whiteboard_locked;
-          updateRecordingUI(Boolean(msg.is_recording), msg.recording_by || "Host");
-          if (!requireScreenApproval) { screenRequestPending = false; screenShareApproved = false; pendingScreenRequests = {}; }
-          updateControlButtons();
-        } else if (msg.type === "wb_toggle") { wbOpen = Boolean(msg.open); updateWhiteboardUI(); if (wbOpen) { redrawWhiteboard(); showNoticeBanner(`🎨 ${msg.by || "Someone"} opened the whiteboard.`, "", 2500); } }
-        else if (msg.type === "wb_lock") { wbLocked = Boolean(msg.locked); updateWhiteboardUI(); }
-        else if (msg.type === "wb_live") { drawSingleStroke(wbCtx, { tool: msg.tool, color: msg.color, size: msg.size, points: [[msg.x1, msg.y1], [msg.x2, msg.y2]] }); }
-        else if (msg.type === "wb_commit") { if (msg.stroke) { wbHistory.push(msg.stroke); redrawWhiteboard(); } }
-        else if (msg.type === "wb_undo") { wbHistory = wbHistory.filter(s => s.id !== msg.stroke_id); redrawWhiteboard(); }
-        else if (msg.type === "wb_clear") { wbHistory = []; redrawWhiteboard(); showNoticeBanner(`🗑️ ${msg.by || "Someone"} cleared the whiteboard.`, "", 2200); }
-        else if (msg.type === "recording_status") {
-          updateRecordingUI(Boolean(msg.is_recording), msg.by || "Host");
-          showNoticeBanner(msg.is_recording ? `🔴 Notice: ${msg.by || "The host"} started recording this meeting.` : "⏹ The host stopped recording this meeting.", msg.is_recording ? "denied" : "", msg.is_recording ? 6000 : 4000);
-        } else if (msg.type === "screen_share_revoked") {
-          if (isSharingScreen) await stopScreenShare(false);
-          screenRequestPending = false; screenShareApproved = false; updateControlButtons();
-          showNoticeBanner(msg.reason || "Screen share stopped.", "denied", 4500);
-        } else if (["screen_share_request", "screen_share_approved", "screen_share_denied", "caption", "reaction", "chat_public", "chat_private"].includes(msg.type)) {
-          handleIncomingRoomEvent(msg);
-        } else if (msg.type === "user_joined") {
-          const isNew = !peerNames[msg.user.id];
-          peerNames[msg.user.id] = msg.user.name; peerAvatars[msg.user.id] = msg.user.avatar || "";
-          ensureVideoTile(msg.user.id, msg.user.name, true, msg.user.avatar || "");
-          scheduleDmRefresh();
-          if (isNew) { playJoinSound(); showNoticeBanner(`👋 ${msg.user.name} joined the meeting.`, "", 2800); }
-        } else if (msg.type === "user_left") {
-          delete peerNames[msg.sender]; delete peerAvatars[msg.sender]; delete pendingScreenRequests[msg.sender]; lkSpeakingIds.delete(msg.sender);
-          document.getElementById(`req-${msg.sender}`)?.remove();
-          removeVideoTile(msg.sender); scheduleDmRefresh();
-        }
-      };
-      updateControlButtons();
-    }
-
-    copyCallLinkBtn.onclick = () => copyText(getMeetingUrl(currentRoomId), copyCallLinkBtn);
-    leaveBtn.onclick = async () => {
-      isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); wsPingTimer = null;
-      clearTimeout(participantsRenderTimer); participantsRenderTimer = null; clearTimeout(dmRefreshTimer); dmRefreshTimer = null;
-      if (isRecordingLocally) await stopHostRecording(true);
-      stopLocalVoiceMonitor(); stopSpeechRecognition(); stopWhisperCaptions(); captionsEnabled = false; clearTimeout(captionClearTimer); captionBar.classList.add("hidden");
-      await exitScreenFullscreenIfActive();
-      if (document.fullscreenElement === whiteboardStage || document.webkitFullscreenElement === whiteboardStage) { try { if (document.exitFullscreen) await document.exitFullscreen(); else if (document.webkitExitFullscreen) await document.webkitExitFullscreen(); } catch {} }
-      if (ws) try { ws.close(); } catch {} ws = null;
-      if (lkRoom) { try { await lkRoom.disconnect(); } catch {} lkRoom = null; }
-      const lv = document.getElementById("tile-local")?.querySelector("video");
-      if (lv?.srcObject) { lv.srcObject.getTracks().forEach(t => t.stop()); lv.srcObject = null; }
-      peerNames = {}; peerAvatars = {}; waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null;
-      pinnedTileId = null; lastActiveSpeakerTileId = null; lastSpeakingKey = ""; lkSpeakingIds.clear(); seenMsgIds.clear();
-      wbOpen = false; wbLocked = false; wbHistory = []; redrawWhiteboard(); tileOrder = ["local"]; currentPage = 1;
-      wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; speakerMuted = false; isSharingScreen = false; hasJoinedRoom = false;
-      isHost = false; autoRecordOnJoin = false; isMeetingRecording = false; requireJoinApproval = false; activeSharer = null; activeSharerName = null; screenRequestPending = false; screenShareApproved = false;
-      audioContainer.innerHTML = ""; await hideScreenStage(); whiteboardStage.classList.add("hidden"); videoGrid.innerHTML = ""; reactionLayer.innerHTML = ""; bannerContainer.innerHTML = ""; publicMessages.innerHTML = ""; privateMessages.innerHTML = ""; participantSearch.value = "";
-      controlsDock.classList.remove("more-open"); participantsPanel.classList.add("hidden");
-      if (window.innerWidth <= 768) chatPanel.classList.add("hidden");
-      joinOptionsOverlay.classList.add("hidden"); waitingRoomOverlay.classList.add("hidden"); recordingPill.classList.add("hidden");
-      unreadPublic = 0; unreadPrivate = 0; updateUnreadBadges(); switchChatTab("public");
-      callView.classList.add("hidden"); lobbyView.classList.remove("hidden");
-      checkUrlForRoom(); if (isMainHostServer) { loadMeetings(); loadRecordings(); }
-    };
-
-    function handlePageExit() {
-      isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer);
-      if (ws) try { ws.close(); } catch {}
-      if (lkRoom) try { lkRoom.disconnect(); } catch {}
-    }
-    window.addEventListener("beforeunload", handlePageExit);
-    window.addEventListener("pagehide", handlePageExit);
-    window.addEventListener("popstate", checkUrlForRoom);
-    checkOwnerAccess();
-    checkUrlForRoom();
-  </script>
-</body>
-</html>"""
-
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=10.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
-
-
-def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS meetings (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                host_name TEXT NOT NULL,
-                scheduled_at TEXT,
-                created_at TEXT NOT NULL,
-                host_key TEXT,
-                require_screen_approval INTEGER NOT NULL DEFAULT 1,
-                record_meeting INTEGER NOT NULL DEFAULT 0,
-                require_join_approval INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(meetings)").fetchall()}
-        if "host_key" not in cols:
-            conn.execute("ALTER TABLE meetings ADD COLUMN host_key TEXT")
-        if "require_screen_approval" not in cols:
-            conn.execute("ALTER TABLE meetings ADD COLUMN require_screen_approval INTEGER NOT NULL DEFAULT 1")
-        if "record_meeting" not in cols:
-            conn.execute("ALTER TABLE meetings ADD COLUMN record_meeting INTEGER NOT NULL DEFAULT 0")
-        if "require_join_approval" not in cols:
-            conn.execute("ALTER TABLE meetings ADD COLUMN require_join_approval INTEGER NOT NULL DEFAULT 0")
-
-
-init_db()
-
-
-def is_main_host_request(request: Request) -> bool:
-    client_ip = request.client.host if request.client else ""
-    if client_ip not in ("127.0.0.1", "::1"):
-        return False
-    for hdr in ("x-forwarded-for", "x-real-ip", "forwarded", "cf-connecting-ip", "x-forwarded-host"):
-        if request.headers.get(hdr):
-            return False
-    host_hdr = (request.headers.get("host") or "").split(":")[0].lower()
-    return host_hdr in ("localhost", "127.0.0.1", "[::1]")
-
-
-def require_main_host(request: Request):
-    if not is_main_host_request(request):
-        raise HTTPException(status_code=403, detail="Only the owner on the main host server can access this.")
-
-
-def generate_meeting_code() -> str:
-    alphabet = string.ascii_lowercase + string.digits
-    return f"{''.join(secrets.choice(alphabet) for _ in range(3))}-{''.join(secrets.choice(alphabet) for _ in range(4))}-{''.join(secrets.choice(alphabet) for _ in range(3))}"
-
-
-def get_meeting_row(meeting_id: str) -> dict | None:
-    with get_db() as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM meetings WHERE id = ?", (meeting_id,)).fetchone()
-    return dict(row) if row else None
-
-
-def sanitize_avatar(avatar: str | None) -> str:
-    if not isinstance(avatar, str):
-        return ""
-    if avatar.startswith("data:image/") and len(avatar) <= 30_000:
-        return avatar
-    return ""
-
-
-def mint_livekit_token(room_id: str, client_id: str, name: str, is_host: bool) -> str:
-    return (
-        lk_api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-        .with_identity(client_id)
-        .with_name(name)
-        .with_grants(lk_api.VideoGrants(room_join=True, room=room_id, can_publish=True, can_subscribe=True, can_publish_data=True, room_admin=is_host))
-        .to_jwt()
-    )
-
-
-class MeetingCreate(BaseModel):
-    title: str = "Instant Meeting"
-    host_name: str = "Host"
-    scheduled_at: str | None = None
-    require_screen_approval: bool = True
-    record_meeting: bool = False
-    require_join_approval: bool = False
-
-
-@app.get("/")
-@app.get("/room/{room_id}")
-async def serve_app(room_id: str | None = None):
-    return HTMLResponse(
-        HTML_CONTENT,
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-        },
-    )
-
-
-@app.get("/api/owner-status")
-async def owner_status(request: Request):
-    return {"is_main_host": is_main_host_request(request)}
-
-
-@app.post("/api/meetings")
-async def create_meeting(payload: MeetingCreate):
-    meeting_id = generate_meeting_code()
-    host_key = secrets.token_urlsafe(16)
-    created_at = datetime.now(timezone.utc).isoformat()
-    title = payload.title.strip() or "Meeting"
-    host_name = payload.host_name.strip() or "Host"
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO meetings (id, title, host_name, scheduled_at, created_at, host_key, require_screen_approval, record_meeting, require_join_approval) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (meeting_id, title, host_name, payload.scheduled_at, created_at, host_key, int(payload.require_screen_approval), int(payload.record_meeting), int(payload.require_join_approval)),
-        )
-    return {
-        "id": meeting_id, "title": title, "host_name": host_name, "scheduled_at": payload.scheduled_at, "created_at": created_at,
-        "host_key": host_key, "require_screen_approval": payload.require_screen_approval, "record_meeting": payload.record_meeting,
-        "require_join_approval": payload.require_join_approval, "link": f"/room/{meeting_id}",
-    }
-
-
-@app.get("/api/meetings")
-async def list_meetings(request: Request):
-    require_main_host(request)
-    with get_db() as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT id, title, host_name, scheduled_at, created_at, require_screen_approval, record_meeting, require_join_approval FROM meetings ORDER BY COALESCE(scheduled_at, created_at) ASC").fetchall()
-    return [{**dict(r), "require_screen_approval": bool(r["require_screen_approval"]), "record_meeting": bool(r["record_meeting"]), "require_join_approval": bool(r["require_join_approval"])} for r in rows]
-
-
-@app.get("/api/meetings/{meeting_id}")
-async def get_meeting(meeting_id: str):
-    row = get_meeting_row(meeting_id)
-    if not row:
-        return {"id": meeting_id, "title": f"Room {meeting_id}", "host_name": None, "scheduled_at": None, "require_screen_approval": True, "record_meeting": False, "require_join_approval": False}
-    return {"id": row["id"], "title": row["title"], "host_name": row["host_name"], "scheduled_at": row["scheduled_at"], "require_screen_approval": bool(row["require_screen_approval"]), "record_meeting": bool(row["record_meeting"]), "require_join_approval": bool(row["require_join_approval"])}
-
-
-@app.delete("/api/meetings/{meeting_id}")
-async def delete_meeting(meeting_id: str, request: Request):
-    require_main_host(request)
-    with get_db() as conn:
-        if conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,)).rowcount == 0:
-            raise HTTPException(status_code=404, detail="Meeting not found")
-    return {"deleted": True}
-
-
-@app.post("/api/recordings/{room_id}")
-async def save_recording(room_id: str, request: Request):
-    req_host_key = request.headers.get("x-host-key", "")
-    row = get_meeting_row(room_id)
-    expected_secret = (row.get("host_key") if row else None) or room_meta.get(room_id, {}).get("host_secret")
-    if not (expected_secret and req_host_key and secrets.compare_digest(req_host_key, expected_secret)):
-        raise HTTPException(status_code=403, detail="Strictly only the meeting host can save recordings.")
-    data = await request.body()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty recording")
-    safe_room = "".join(c for c in room_id if c.isalnum() or c in "-_") or "meeting"
-    filename = f"meeting-{safe_room}-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.webm"
-    file_path = RECORDINGS_DIR / filename
-    file_path.write_bytes(data)
-    return {"saved": True, "filename": filename, "path": str(file_path), "url": f"/recordings/{filename}"}
-
-
-@app.get("/api/recordings")
-async def list_recordings(request: Request):
-    require_main_host(request)
-    files = sorted(RECORDINGS_DIR.glob("*.webm"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return [{"filename": f.name, "size_mb": round(f.stat().st_size / (1024 * 1024), 2), "url": f"/recordings/{f.name}"} for f in files]
-
-
-def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
-    try:
-        unit, range_spec = range_header.strip().split("=", 1)
-        if unit.lower() != "bytes":
-            raise ValueError
-        start_str, end_str = range_spec.split("-", 1)
-        if not start_str and not end_str:
-            raise ValueError
-        start = max(0, file_size - int(end_str)) if not start_str else int(start_str)
-        end = (file_size - 1) if (not start_str or not end_str) else int(end_str)
-    except ValueError:
-        raise HTTPException(status_code=416, detail="Invalid Range header")
-    if start < 0 or end >= file_size or start > end:
-        raise HTTPException(status_code=416, detail="Requested Range Not Satisfiable")
-    return start, end
-
-
-def _iter_file_range(file_path: Path, start: int, end: int, chunk_size: int = 256 * 1024):
-    with open(file_path, "rb") as f:
-        f.seek(start)
-        remaining = end - start + 1
-        while remaining > 0:
-            chunk = f.read(min(chunk_size, remaining))
-            if not chunk:
-                break
-            remaining -= len(chunk)
-            yield chunk
-
-
-@app.get("/recordings/{filename}")
-async def get_recording_file(filename: str, request: Request, download: int = 0):
-    require_main_host(request)
-    safe_name = Path(filename).name
-    file_path = RECORDINGS_DIR / safe_name
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Recording not found")
-    if download:
-        return FileResponse(file_path, media_type="video/webm", filename=safe_name)
-    file_size = file_path.stat().st_size
-    range_header = request.headers.get("range")
-    headers = {"Accept-Ranges": "bytes"}
-    if range_header:
-        start, end = _parse_range_header(range_header, file_size)
-        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-        headers["Content-Length"] = str(end - start + 1)
-        return StreamingResponse(_iter_file_range(file_path, start, end), status_code=206, headers=headers, media_type="video/webm")
-    headers["Content-Length"] = str(file_size)
-    return StreamingResponse(_iter_file_range(file_path, 0, file_size - 1), status_code=200, headers=headers, media_type="video/webm")
-
-
-async def _safe_send(ws: WebSocket, text: str):
-    try:
-        await asyncio.wait_for(ws.send_text(text), timeout=3.0)
-    except Exception:
-        pass
-
-
-async def broadcast_room(room_id: str, payload: dict, exclude_id: str | None = None):
-    peers = list(rooms.get(room_id, {}).items())
-    if not peers:
-        return
-    text = json.dumps(payload)
-    tasks = [_safe_send(info["ws"], text) for uid, info in peers if uid != exclude_id]
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-
-async def broadcast_waiting_count(room_id: str):
-    await broadcast_room(room_id, {"type": "waiting_count_update", "waiting_count": len(waiting_rooms.get(room_id, {}))})
-
-
-def build_policy_payload(room_id: str) -> dict:
-    meta = room_meta[room_id]
-    return {
-        "type": "room_policy", "host_id": meta["host_id"], "require_screen_approval": meta["require_screen_approval"],
-        "require_join_approval": meta["require_join_approval"], "active_sharer": meta["active_sharer"],
-        "active_sharer_name": meta["active_sharer_name"], "is_recording": meta["is_recording"],
-        "recording_by": meta["recording_by"], "waiting_count": len(waiting_rooms.get(room_id, {})),
-        "whiteboard_open": meta["whiteboard_open"], "whiteboard_locked": meta["whiteboard_locked"],
-    }
-
-
-async def admit_user_to_room(room_id: str, uid: str, ws: WebSocket, name: str, avatar: str, is_host: bool):
-    meta = room_meta[room_id]
-    existing_users = [{"id": eid, "name": info["name"], "avatar": info["avatar"]} for eid, info in rooms[room_id].items() if eid != uid]
-    already_in_room = uid in rooms[room_id]
-    if already_in_room and rooms[room_id][uid]["ws"] is not ws:
-        try:
-            await rooms[room_id][uid]["ws"].close()
-        except Exception:
-            pass
-    rooms[room_id][uid] = {"ws": ws, "name": name, "avatar": avatar}
-    lk_token = mint_livekit_token(room_id, uid, name, is_host)
-
-    payload = {
-        "type": "all_users", "users": existing_users, "is_host": is_host, "host_id": meta["host_id"],
-        "require_screen_approval": meta["require_screen_approval"], "require_join_approval": meta["require_join_approval"],
-        "auto_record": meta["auto_record"], "is_recording": meta["is_recording"], "recording_by": meta["recording_by"],
-        "active_sharer": meta["active_sharer"], "active_sharer_name": meta["active_sharer_name"],
-        "waiting_count": len(waiting_rooms.get(room_id, {})), "whiteboard_open": meta["whiteboard_open"],
-        "whiteboard_locked": meta["whiteboard_locked"], "whiteboard_strokes": meta["whiteboard_strokes"],
-        "livekit_url": LIVEKIT_URL, "livekit_token": lk_token, "max_users": MAX_USERS_PER_ROOM,
-    }
-    if is_host and meta.get("host_secret"):
-        payload["host_secret"] = meta["host_secret"]
-    await ws.send_text(json.dumps(payload))
-
-    if not already_in_room:
-        await broadcast_room(room_id, {"type": "user_joined", "user": {"id": uid, "name": name, "avatar": avatar}}, exclude_id=uid)
-
-    if is_host:
-        await broadcast_room(room_id, build_policy_payload(room_id), exclude_id=uid)
-        if waiting_rooms.get(room_id):
-            await ws.send_text(json.dumps({"type": "waiting_list", "users": [{"id": wid, "name": wi["name"], "avatar": wi["avatar"]} for wid, wi in waiting_rooms[room_id].items()]}))
-        for req_id, req_name in list(meta.get("pending_screen_requests", {}).items()):
-            await ws.send_text(json.dumps({"type": "screen_share_request", "sender": req_id, "sender_name": req_name}))
-
-
-@app.websocket("/ws/{room_id}/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str, name: str = "Guest", host_key: str = ""):
-    await websocket.accept()
-    meeting_row = get_meeting_row(room_id)
-    if room_id not in rooms:
-        rooms[room_id] = {}
-        waiting_rooms[room_id] = {}
-        room_meta[room_id] = {
-            "host_id": None,
-            "host_secret": meeting_row.get("host_key") if meeting_row else None,
-            "require_screen_approval": bool(meeting_row["require_screen_approval"]) if meeting_row else True,
-            "require_join_approval": bool(meeting_row["require_join_approval"]) if meeting_row else False,
-            "auto_record": bool(meeting_row["record_meeting"]) if meeting_row else False,
-            "active_sharer": None, "active_sharer_name": None,
-            "approved_sharers": set(), "pending_screen_requests": {},
-            "is_recording": False, "recording_by": None,
-            "whiteboard_open": False, "whiteboard_locked": False, "whiteboard_strokes": [],
-            "is_ad_hoc": meeting_row is None,
-        }
-
-    meta = room_meta[room_id]
-    user_name = name
-    user_avatar = ""
-    is_host = False
-    joined_or_waiting = False
-
-    try:
-        while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            msg_type = message.get("type")
-            target = message.get("target")
-
-            if msg_type == "ping":
-                await websocket.send_text('{"type":"pong"}')
-                continue
-
-            if msg_type == "join_room" and not joined_or_waiting:
-                joined_or_waiting = True
-                user_name = (message.get("name") or name or "Guest").strip()[:60]
-                user_avatar = sanitize_avatar(message.get("avatar"))
-
-                if client_id not in rooms[room_id] and len(rooms[room_id]) >= MAX_USERS_PER_ROOM:
-                    await websocket.send_text(json.dumps({"type": "room_full", "reason": f"Room is full (maximum {MAX_USERS_PER_ROOM} participants)."}))
-                    await websocket.close()
-                    return
-
-                expected_secret = (meeting_row.get("host_key") if meeting_row else None) or meta.get("host_secret")
-                if expected_secret:
-                    is_host = bool(host_key and secrets.compare_digest(host_key, expected_secret))
-                else:
-                    is_host = meta["host_id"] is None
-                    if is_host:
-                        meta["host_secret"] = secrets.token_urlsafe(16)
-
-                if is_host:
-                    meta["host_id"] = client_id
-
-                if is_host or not meta["require_join_approval"] or client_id in rooms[room_id]:
-                    await admit_user_to_room(room_id, client_id, websocket, user_name, user_avatar, is_host)
-                else:
-                    waiting_rooms[room_id][client_id] = {"ws": websocket, "name": user_name, "avatar": user_avatar}
-                    await websocket.send_text(json.dumps({"type": "waiting_room", "title": meeting_row["title"] if meeting_row else f"Room {room_id}", "host_present": bool(meta["host_id"] and meta["host_id"] in rooms[room_id])}))
-                    host_id = meta["host_id"]
-                    if host_id and host_id in rooms[room_id]:
-                        await _safe_send(rooms[room_id][host_id]["ws"], json.dumps({"type": "waiting_user_joined", "user": {"id": client_id, "name": user_name, "avatar": user_avatar}}))
-                    await broadcast_waiting_count(room_id)
-
-            elif msg_type == "join_decision":
-                if client_id == meta["host_id"] and target in waiting_rooms.get(room_id, {}):
-                    approved = bool(message.get("approved"))
-                    w_info = waiting_rooms[room_id].pop(target)
-                    if approved:
-                        if len(rooms[room_id]) >= MAX_USERS_PER_ROOM:
-                            await _safe_send(w_info["ws"], json.dumps({"type": "join_denied", "reason": f"Room is full (maximum {MAX_USERS_PER_ROOM})."}))
-                            await w_info["ws"].close()
-                        else:
-                            await admit_user_to_room(room_id, target, w_info["ws"], w_info["name"], w_info["avatar"], False)
-                    else:
-                        await _safe_send(w_info["ws"], json.dumps({"type": "join_denied", "reason": "The meeting owner declined your request to join."}))
-                        await w_info["ws"].close()
-                    await broadcast_waiting_count(room_id)
-
-            elif msg_type == "admit_all":
-                if client_id == meta["host_id"] and waiting_rooms.get(room_id):
-                    for wid, w_info in list(waiting_rooms[room_id].items()):
-                        waiting_rooms[room_id].pop(wid, None)
-                        if len(rooms[room_id]) < MAX_USERS_PER_ROOM:
-                            await admit_user_to_room(room_id, wid, w_info["ws"], w_info["name"], w_info["avatar"], False)
-                        else:
-                            await _safe_send(w_info["ws"], json.dumps({"type": "join_denied", "reason": f"Room is full (maximum {MAX_USERS_PER_ROOM})."}))
-                            await w_info["ws"].close()
-                    await broadcast_waiting_count(room_id)
-
-            elif msg_type == "set_join_policy":
-                if client_id == meta["host_id"]:
-                    new_val = bool(message.get("require_approval", False))
-                    meta["require_join_approval"] = new_val
-                    if meeting_row:
-                        with get_db() as conn:
-                            conn.execute("UPDATE meetings SET require_join_approval = ? WHERE id = ?", (int(new_val), room_id))
-                    if not new_val and waiting_rooms.get(room_id):
-                        for wid, w_info in list(waiting_rooms[room_id].items()):
-                            waiting_rooms[room_id].pop(wid, None)
-                            if len(rooms[room_id]) < MAX_USERS_PER_ROOM:
-                                await admit_user_to_room(room_id, wid, w_info["ws"], w_info["name"], w_info["avatar"], False)
-                            else:
-                                await _safe_send(w_info["ws"], json.dumps({"type": "join_denied", "reason": f"Room is full (maximum {MAX_USERS_PER_ROOM})."}))
-                    await broadcast_room(room_id, build_policy_payload(room_id))
-
-            elif client_id not in rooms.get(room_id, {}):
-                continue
-
-            elif msg_type == "wb_toggle":
-                meta["whiteboard_open"] = bool(message.get("open", False))
-                await broadcast_room(room_id, {"type": "wb_toggle", "open": meta["whiteboard_open"], "by": user_name}, exclude_id=client_id)
-
-            elif msg_type == "wb_lock":
-                if client_id == meta["host_id"]:
-                    meta["whiteboard_locked"] = bool(message.get("locked", False))
-                    await broadcast_room(room_id, {"type": "wb_lock", "locked": meta["whiteboard_locked"]})
-
-            elif msg_type == "wb_live":
-                if not meta["whiteboard_locked"] or client_id == meta["host_id"]:
-                    message["sender"] = client_id
-                    await broadcast_room(room_id, message, exclude_id=client_id)
-
-            elif msg_type == "wb_commit":
-                if not meta["whiteboard_locked"] or client_id == meta["host_id"]:
-                    stroke = message.get("stroke")
-                    if isinstance(stroke, dict):
-                        stroke["sender"] = client_id
-                        meta["whiteboard_strokes"].append(stroke)
-                        if len(meta["whiteboard_strokes"]) > MAX_WB_STROKES:
-                            meta["whiteboard_strokes"] = meta["whiteboard_strokes"][-MAX_WB_STROKES:]
-                        await broadcast_room(room_id, {"type": "wb_commit", "stroke": stroke}, exclude_id=client_id)
-
-            elif msg_type == "wb_undo":
-                stroke_id = message.get("stroke_id")
-                if stroke_id:
-                    before = len(meta["whiteboard_strokes"])
-                    meta["whiteboard_strokes"] = [s for s in meta["whiteboard_strokes"] if not (s.get("id") == stroke_id and (s.get("sender") == client_id or client_id == meta["host_id"]))]
-                    if len(meta["whiteboard_strokes"]) != before:
-                        await broadcast_room(room_id, {"type": "wb_undo", "stroke_id": stroke_id}, exclude_id=client_id)
-
-            elif msg_type == "wb_clear":
-                if not meta["whiteboard_locked"] or client_id == meta["host_id"]:
-                    meta["whiteboard_strokes"].clear()
-                    await broadcast_room(room_id, {"type": "wb_clear", "by": user_name}, exclude_id=client_id)
-
-            elif msg_type in ("chat_public", "reaction", "caption"):
-                message["sender"] = client_id
-                message["sender_name"] = user_name
-                await broadcast_room(room_id, message, exclude_id=client_id)
-
-            elif msg_type == "chat_private":
-                if target and target in rooms.get(room_id, {}):
-                    message["sender"] = client_id
-                    message["sender_name"] = user_name
-                    await _safe_send(rooms[room_id][target]["ws"], json.dumps(message))
-
-            elif msg_type == "recording_started":
-                if client_id == meta["host_id"]:
-                    meta["is_recording"] = True
-                    meta["recording_by"] = user_name
-                    await broadcast_room(room_id, {"type": "recording_status", "is_recording": True, "by": user_name})
-
-            elif msg_type == "recording_stopped":
-                if client_id == meta["host_id"]:
-                    meta["is_recording"] = False
-                    meta["recording_by"] = None
-                    await broadcast_room(room_id, {"type": "recording_status", "is_recording": False, "by": user_name})
-
-            elif msg_type == "set_screen_policy":
-                if client_id == meta["host_id"]:
-                    new_val = bool(message.get("require_approval", True))
-                    meta["require_screen_approval"] = new_val
-                    if not new_val:
-                        meta["approved_sharers"].clear()
-                        meta["pending_screen_requests"].clear()
-                    if meeting_row:
-                        with get_db() as conn:
-                            conn.execute("UPDATE meetings SET require_screen_approval = ? WHERE id = ?", (int(new_val), room_id))
-                    await broadcast_room(room_id, build_policy_payload(room_id))
-
-            elif msg_type == "screen_share_request":
-                if meta["active_sharer"] and meta["active_sharer"] != client_id:
-                    await websocket.send_text(json.dumps({"type": "screen_share_denied", "reason": f"{meta['active_sharer_name']} is already sharing their screen."}))
-                elif not meta["require_screen_approval"] or client_id == meta["host_id"]:
-                    meta["approved_sharers"].add(client_id)
-                    await websocket.send_text(json.dumps({"type": "screen_share_approved"}))
-                else:
-                    meta["pending_screen_requests"][client_id] = user_name
-                    host_id = meta["host_id"]
-                    if host_id and host_id in rooms.get(room_id, {}):
-                        await _safe_send(rooms[room_id][host_id]["ws"], json.dumps({"type": "screen_share_request", "msgId": message.get("msgId"), "sender": client_id, "sender_name": user_name}))
-                    elif not host_id:
-                        meta["pending_screen_requests"].pop(client_id, None)
-                        await websocket.send_text(json.dumps({"type": "screen_share_denied", "reason": "The meeting host is not in the room yet."}))
-
-            elif msg_type == "screen_share_decision":
-                if client_id == meta["host_id"] and target in rooms.get(room_id, {}):
-                    meta["pending_screen_requests"].pop(target, None)
-                    approved = bool(message.get("approved"))
-                    if approved:
-                        if meta["active_sharer"] and meta["active_sharer"] != target:
-                            await _safe_send(rooms[room_id][target]["ws"], json.dumps({"type": "screen_share_denied", "reason": f"{meta['active_sharer_name']} is currently sharing."}))
-                        else:
-                            meta["approved_sharers"].add(target)
-                            await _safe_send(rooms[room_id][target]["ws"], json.dumps({"type": "screen_share_approved"}))
-                    else:
-                        meta["approved_sharers"].discard(target)
-                        await _safe_send(rooms[room_id][target]["ws"], json.dumps({"type": "screen_share_denied", "reason": "The meeting host declined your screen share request."}))
-
-            elif msg_type == "screen_share_started":
-                if meta["active_sharer"] and meta["active_sharer"] != client_id:
-                    await websocket.send_text(json.dumps({"type": "screen_share_revoked", "reason": f"{meta['active_sharer_name']} is already sharing their screen."}))
-                elif meta["require_screen_approval"] and client_id != meta["host_id"] and client_id not in meta["approved_sharers"]:
-                    await websocket.send_text(json.dumps({"type": "screen_share_revoked", "reason": "Host approval is required to share your screen."}))
-                else:
-                    meta["approved_sharers"].discard(client_id)
-                    meta["pending_screen_requests"].pop(client_id, None)
-                    meta["active_sharer"] = client_id
-                    meta["active_sharer_name"] = user_name
-                    await broadcast_room(room_id, build_policy_payload(room_id))
-
-            elif msg_type == "screen_share_stopped":
-                if meta["active_sharer"] == client_id:
-                    meta["active_sharer"] = None
-                    meta["active_sharer_name"] = None
-                    await broadcast_room(room_id, build_policy_payload(room_id))
-
-            elif msg_type == "host_stop_share":
-                if client_id == meta["host_id"] and meta["active_sharer"]:
-                    sharer_id = meta["active_sharer"]
-                    meta["active_sharer"] = None
-                    meta["active_sharer_name"] = None
-                    if sharer_id in rooms.get(room_id, {}):
-                        await _safe_send(rooms[room_id][sharer_id]["ws"], json.dumps({"type": "screen_share_revoked", "reason": "The meeting host stopped your screen share."}))
-                    await broadcast_room(room_id, build_policy_payload(room_id))
-
-    except WebSocketDisconnect:
-        if room_id in waiting_rooms and client_id in waiting_rooms[room_id] and waiting_rooms[room_id][client_id]["ws"] is websocket:
-            del waiting_rooms[room_id][client_id]
-            host_id = meta["host_id"]
-            if host_id and host_id in rooms.get(room_id, {}):
-                await _safe_send(rooms[room_id][host_id]["ws"], json.dumps({"type": "waiting_user_left", "sender": client_id}))
-            await broadcast_waiting_count(room_id)
-
-        if room_id in rooms and client_id in rooms[room_id] and rooms[room_id][client_id]["ws"] is websocket:
-            del rooms[room_id][client_id]
-            meta["approved_sharers"].discard(client_id)
-            meta["pending_screen_requests"].pop(client_id, None)
-
-            policy_changed = False
-            recording_stopped = False
-            if meta["active_sharer"] == client_id:
-                meta["active_sharer"] = None
-                meta["active_sharer_name"] = None
-                policy_changed = True
-            if meta["host_id"] == client_id:
-                if meta["is_recording"]:
-                    meta["is_recording"] = False
-                    meta["recording_by"] = None
-                    recording_stopped = True
-                meta["host_id"] = None
-                policy_changed = True
-
-            await broadcast_room(room_id, {"type": "user_left", "sender": client_id})
-            if recording_stopped and rooms[room_id]:
-                await broadcast_room(room_id, {"type": "recording_status", "is_recording": False})
-            if policy_changed and rooms[room_id]:
-                await broadcast_room(room_id, build_policy_payload(room_id))
-
-        if room_id in rooms and not rooms[room_id] and not waiting_rooms.get(room_id):
-            rooms.pop(room_id, None)
-            waiting_rooms.pop(room_id, None)
-            room_meta.pop(room_id, None)
+      currentRoomId = roomId; currentMeetingTitle =
