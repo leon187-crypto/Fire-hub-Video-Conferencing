@@ -1,11 +1,13 @@
 import asyncio
 import json
+import mimetypes
 import os
 import secrets
 import sqlite3
 import string
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
@@ -17,11 +19,15 @@ app = FastAPI()
 BASE_DIR = Path(__file__).parent
 DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "meetings.db")))
 RECORDINGS_DIR = Path(os.getenv("RECORDINGS_DIR", str(BASE_DIR / "recordings")))
+CHAT_UPLOADS_DIR = Path(os.getenv("CHAT_UPLOADS_DIR", str(BASE_DIR / "chat_uploads")))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+CHAT_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_USERS_PER_ROOM = 100
 MAX_WB_STROKES = 2500
+MAX_CHAT_FILE_BYTES = 25 * 1024 * 1024
+SAFE_INLINE_MIME = {"image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"}
 
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "ws://localhost:7880")
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "devkey")
@@ -40,7 +46,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <title>Python LiveKit Video Conference (100 Users)</title>
   <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/yusitnikov/fix-webm-duration/fix-webm-duration.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <style>
     :root {
       --bg-page: #0f1115;
@@ -138,10 +143,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .meeting-title { font-weight: 600; font-size: 1rem; word-break: break-word; }
     .meeting-sub { font-size: 0.82rem; color: var(--text-muted); word-break: break-word; }
     .link-box { background: var(--bg-input); border: 1px dashed #3b82f6; padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 0.85rem; word-break: break-all; color: var(--link-color); }
-    #player-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    #player-modal, #img-lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.86); z-index: 65; display: flex; align-items: center; justify-content: center; padding: 1rem; }
     .player-box { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 12px; padding: 1rem; width: min(95vw, 960px); display: flex; flex-direction: column; gap: 0.75rem; }
     .player-header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
     #player-video { width: 100%; max-height: 75dvh; background: #000; border-radius: 8px; }
+    #img-lightbox-img { max-width: 100%; max-height: 75dvh; object-fit: contain; border-radius: 8px; background: #000; margin: 0 auto; }
     #call-view { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; position: relative; }
     #call-header { order: 1; padding: 0.65rem 1.15rem; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 0.65rem; flex-shrink: 0; }
     .call-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
@@ -252,7 +258,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .floating-reaction .who { font-size: 0.72rem; background: rgba(0, 0, 0, 0.75); padding: 2px 7px; border-radius: 999px; color: #e4e4e7; }
     @keyframes floatUp { 0% { transform: translateY(0) scale(0.7); opacity: 0; } 15% { transform: translateY(-20px) scale(1.1); opacity: 1; } 100% { transform: translateY(-240px) scale(1); opacity: 0; } }
     @keyframes popIn { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-    .side-panel { width: 340px; background: var(--bg-surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; height: 100%; }
+    .side-panel { width: 340px; background: var(--bg-surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; height: 100%; position: relative; }
+    #chat-panel.drag-over { outline: 2px dashed #3b82f6; outline-offset: -4px; }
     .panel-header { padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 0.95rem; }
     .panel-scroll { flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; }
     .p-section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem; }
@@ -283,8 +290,31 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .msg-item.dm .msg-bubble { border: 1px solid #9333ea; }
     .msg-item.dm:not(.self) .msg-bubble { background: var(--dm-bg); cursor: pointer; }
     .dm-tag { display: inline-block; font-size: 0.68rem; background: #7e22ce; color: #fff; padding: 1px 5px; border-radius: 4px; margin-right: 4px; }
-    .chat-input-row { padding: 0.7rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; background: var(--bg-surface-2); }
-    .chat-input-row input { flex: 1; padding: 0.5rem 0.7rem; font-size: 0.9rem; }
+    .msg-attachments { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.35rem; }
+    .msg-attachments.no-text { margin-top: 0; }
+    .msg-img-wrap { display: flex; flex-direction: column; gap: 4px; }
+    .msg-img-thumb { max-width: 220px; max-height: 190px; border-radius: 8px; object-fit: cover; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.16); background: #000; }
+    .msg-file-card { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; background: rgba(0, 0, 0, 0.22); border: 1px solid rgba(255, 255, 255, 0.14); padding: 0.45rem 0.55rem; border-radius: 8px; min-width: 190px; }
+    :root[data-theme="light"] .msg-item:not(.self) .msg-file-card { background: rgba(15, 23, 42, 0.06); border-color: rgba(15, 23, 42, 0.14); }
+    .msg-file-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+    .msg-file-name { font-size: 0.8rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .msg-file-size { font-size: 0.7rem; opacity: 0.78; }
+    .msg-file-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .msg-file-actions a { padding: 0.25rem 0.45rem; font-size: 0.72rem; border-radius: 6px; }
+    .chat-attach-preview { padding: 0.45rem 0.7rem; border-top: 1px solid var(--border); background: var(--bg-surface-2); display: flex; gap: 0.45rem; flex-wrap: wrap; max-height: 115px; overflow-y: auto; }
+    .attach-chip { display: flex; align-items: center; gap: 0.4rem; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 0.28rem 0.45rem; max-width: 195px; }
+    .attach-chip img { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+    .attach-chip-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+    .attach-chip-name { font-size: 0.75rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .attach-chip-size { font-size: 0.67rem; color: var(--text-muted); }
+    .attach-chip-rm { background: transparent; color: var(--text-muted); padding: 0 4px; font-size: 0.85rem; }
+    .emoji-picker { position: absolute; bottom: 58px; left: 0.65rem; right: 0.65rem; background: var(--bg-drawer); border: 1px solid var(--border-strong); border-radius: 10px; padding: 0.55rem; z-index: 20; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45); max-height: 220px; overflow-y: auto; }
+    .emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+    .emoji-opt { background: transparent; padding: 0.3rem; font-size: 1.2rem; border-radius: 6px; line-height: 1.1; }
+    .emoji-opt:hover { background: var(--bg-react-hover); }
+    .chat-input-row { padding: 0.65rem; border-top: 1px solid var(--border); display: flex; gap: 0.35rem; align-items: center; background: var(--bg-surface-2); }
+    .chat-icon-btn { padding: 0.48rem 0.55rem; font-size: 1rem; line-height: 1; flex-shrink: 0; }
+    .chat-input-row input[type="text"] { flex: 1; min-width: 0; padding: 0.5rem 0.65rem; font-size: 0.9rem; }
     @media (max-width: 768px) {
       .hide-sm { display: none !important; }
       .mobile-only { display: inline-flex !important; }
@@ -376,6 +406,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   </div>
 
   <div id="player-modal" class="hidden"><div class="player-box"><div class="player-header"><strong id="player-title">Recording</strong><button id="player-close-btn" class="danger" style="padding: 0.35rem 0.75rem;">✕ Close</button></div><video id="player-video" controls autoplay playsinline></video></div></div>
+  <div id="img-lightbox" class="hidden"><div class="player-box"><div class="player-header"><strong id="img-lightbox-title">Image Preview</strong><div class="row"><a id="img-lightbox-download" class="btn-link" href="#" download>⬇️ Download</a><button id="img-lightbox-close" class="danger" type="button" style="padding: 0.35rem 0.75rem;">✕ Close</button></div></div><img id="img-lightbox-img" alt="Preview" /></div></div>
 
   <div id="call-view" class="hidden">
     <div id="banner-container"></div>
@@ -438,7 +469,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         </div>
       </div>
       <aside id="participants-panel" class="side-panel hidden"><div class="panel-header"><span id="participants-panel-title">Participants (1)</span><button id="close-participants-btn" class="secondary" style="padding: 0.25rem 0.55rem;">✕</button></div><div style="padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border);"><input id="participant-search" type="text" placeholder="Search participants..." style="padding: 0.45rem 0.65rem;" /></div><div id="participants-list" class="panel-scroll"></div></aside>
-      <aside id="chat-panel" class="side-panel hidden"><div class="chat-tabs-bar"><div class="chat-tabs"><button id="tab-public" class="chat-tab active-tab">Public <span id="badge-public" class="badge hidden">0</span></button><button id="tab-private" class="chat-tab">Personal (DM) <span id="badge-private" class="badge hidden">0</span></button></div><button id="close-chat-btn" class="secondary" style="margin: 0 0.5rem; padding: 0.25rem 0.55rem;">✕</button></div><div id="dm-bar" class="dm-bar hidden"><label for="dm-target" style="margin-bottom: 4px;">Send Private Message To:</label><select id="dm-target"></select></div><div id="public-messages" class="chat-messages"></div><div id="private-messages" class="chat-messages hidden"></div><div class="chat-input-row"><input id="chat-input" type="text" placeholder="Message everyone..." /><button id="send-chat-btn">Send</button></div></aside>
+      <aside id="chat-panel" class="side-panel hidden"><div class="chat-tabs-bar"><div class="chat-tabs"><button id="tab-public" class="chat-tab active-tab">Public <span id="badge-public" class="badge hidden">0</span></button><button id="tab-private" class="chat-tab">Personal (DM) <span id="badge-private" class="badge hidden">0</span></button></div><button id="close-chat-btn" class="secondary" style="margin: 0 0.5rem; padding: 0.25rem 0.55rem;">✕</button></div><div id="dm-bar" class="dm-bar hidden"><label for="dm-target" style="margin-bottom: 4px;">Send Private Message To:</label><select id="dm-target"></select></div><div id="public-messages" class="chat-messages"></div><div id="private-messages" class="chat-messages hidden"></div><div id="chat-attach-preview" class="chat-attach-preview hidden"></div><div id="emoji-picker" class="emoji-picker hidden"></div><div class="chat-input-row"><input id="chat-file-input" type="file" multiple class="hidden" /><button id="chat-attach-btn" type="button" class="secondary chat-icon-btn" title="Attach PDF, image, or file">📎</button><button id="chat-emoji-btn" type="button" class="secondary chat-icon-btn" title="Insert emoji">😊</button><input id="chat-input" type="text" placeholder="Message everyone (or Ctrl+V image)..." /><button id="send-chat-btn">Send</button></div></aside>
     </div>
   </div>
 
@@ -454,6 +485,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       videoSimulcastLayers: [LivekitClient.VideoPresets.h720, LivekitClient.VideoPresets.h360],
       degradationPreference: "maintain-framerate"
     };
+    const CHAT_EMOJIS = [
+      "😀","😂","😍","🥳","😎","🤔","😅","😭","🙏","👍","👎","👏","🙌","🔥","🎉","❤️",
+      "💯","✅","❌","⚠️","💡","📌","📎","📄","🖼️","🎥","🎤","🔊","💻","📱","⏰","🚀",
+      "🤩","😊","😉","😇","🤗","🤝","💪","👀","✨","🌟","🎯","📝","📊","📁","🔒","🔓"
+    ];
 
     const lobbyView = document.getElementById("lobby-view");
     const lobbyHomeSections = document.getElementById("lobby-home-sections");
@@ -496,6 +532,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const playerTitle = document.getElementById("player-title");
     const playerVideo = document.getElementById("player-video");
     const playerCloseBtn = document.getElementById("player-close-btn");
+    const imgLightbox = document.getElementById("img-lightbox");
+    const imgLightboxTitle = document.getElementById("img-lightbox-title");
+    const imgLightboxImg = document.getElementById("img-lightbox-img");
+    const imgLightboxDownload = document.getElementById("img-lightbox-download");
+    const imgLightboxClose = document.getElementById("img-lightbox-close");
 
     const pipVideo = document.getElementById("pip-video");
     const callTitleText = document.getElementById("call-title-text");
@@ -586,6 +627,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const dmTarget = document.getElementById("dm-target");
     const publicMessages = document.getElementById("public-messages");
     const privateMessages = document.getElementById("private-messages");
+    const chatAttachPreview = document.getElementById("chat-attach-preview");
+    const emojiPicker = document.getElementById("emoji-picker");
+    const chatFileInput = document.getElementById("chat-file-input");
+    const chatAttachBtn = document.getElementById("chat-attach-btn");
+    const chatEmojiBtn = document.getElementById("chat-emoji-btn");
     const chatInput = document.getElementById("chat-input");
     const sendChatBtn = document.getElementById("send-chat-btn");
 
@@ -629,6 +675,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     let whisperBuffers = [], whisperSampleCount = 0, whisperVoiceFrames = 0, whisperActiveSpeakerLabel = "Speaker";
 
     let activeChatTab = "public", unreadPublic = 0, unreadPrivate = 0, localAvatar = localStorage.getItem("vc_avatar") || "";
+    let pendingChatFiles = [], isSendingChat = false;
 
     if (window.innerWidth > 768) chatPanel.classList.remove("hidden");
     const secondaryControlsEl = document.querySelector(".secondary-controls");
@@ -978,86 +1025,188 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       setTimeout(() => card.remove(), 12000);
     }
 
-    function downloadCanvasPng(canvas, filename) {
+    function downloadCanvasPng(canvas, filename, copyToClipboard = false) {
       canvas.toBlob((blob) => {
-        if (!blob) return;
+        if (!blob) { showNoticeBanner("⚠️ Could not generate PNG snapshot.", "denied", 3000); return; }
         const url = URL.createObjectURL(blob), a = document.createElement("a");
         a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        if (copyToClipboard && navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
+          navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
+            .then(() => showNoticeBanner("📸 Snapshot saved & copied to clipboard!", "approved", 3000))
+            .catch(() => showNoticeBanner("📸 Snapshot saved to Downloads!", "approved", 3000));
+        } else {
+          showNoticeBanner("📸 Snapshot saved to Downloads!", "approved", 2800);
+        }
       }, "image/png");
     }
 
     function takeTileScreenshot(tileId, personName) {
       const tile = document.getElementById(`tile-${tileId}`); if (!tile) return;
       const vid = tile.querySelector("video"), ph = tile.querySelector(".placeholder");
-      if (!vid || (ph && !ph.classList.contains("hidden")) || vid.videoWidth === 0) {
+      if (!vid || (ph && !ph.classList.contains("hidden")) || vid.readyState < 2 || vid.videoWidth === 0) {
         showNoticeBanner(`⚠️ Cannot take screenshot — ${personName}'s camera is off.`, "denied", 3000); return;
       }
       const canvas = document.createElement("canvas"); canvas.width = vid.videoWidth; canvas.height = vid.videoHeight;
       canvas.getContext("2d").drawImage(vid, 0, 0, canvas.width, canvas.height);
       tile.style.filter = "brightness(1.85)"; setTimeout(() => { tile.style.filter = ""; }, 160);
       const safeName = personName.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-|-$/g, "") || "camera";
-      downloadCanvasPng(canvas, `camera-${safeName}-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.png`);
-      showNoticeBanner(`📸 Saved HD camera screenshot of ${personName}!`, "approved", 2500);
+      downloadCanvasPng(canvas, `camera-${safeName}-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.png`, true);
     }
 
-    async function takeStageScreenshot() {
-      const target = document.getElementById("stage");
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const filename = `meeting-snapshot-${currentRoomId || "meeting"}-${stamp}.png`;
+    function drawRoundedRectPath(ctx, x, y, w, h, r) {
+      const rad = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + rad, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rad);
+      ctx.arcTo(x + w, y + h, x, y + h, rad);
+      ctx.arcTo(x, y + h, x, y, rad);
+      ctx.arcTo(x, y, x + w, y, rad);
+      ctx.closePath();
+    }
 
-      if (typeof html2canvas === "function" && target) {
-        const videoCanvases = new Map(), videos = Array.from(target.querySelectorAll("video"));
-        videos.forEach((vid, idx) => {
-          if (vid.videoWidth > 0 && vid.videoHeight > 0 && vid.offsetParent !== null) {
-            const cw = vid.clientWidth || vid.videoWidth, ch = vid.clientHeight || vid.videoHeight;
-            const c = document.createElement("canvas"); c.width = cw; c.height = ch;
-            const tctx = c.getContext("2d"), vw = vid.videoWidth, vh = vid.videoHeight;
-            const scale = (vid.id === "screen-stage-video") ? Math.min(cw / vw, ch / vh) : Math.max(cw / vw, ch / vh);
-            const dw = vw * scale, dh = vh * scale;
-            tctx.fillStyle = "#000"; tctx.fillRect(0, 0, cw, ch);
-            tctx.drawImage(vid, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
-            vid.dataset.snapIdx = String(idx); videoCanvases.set(String(idx), c);
+    function drawCovered(ctx, sourceEl, dx, dy, dw, dh) {
+      const vw = sourceEl.videoWidth || sourceEl.naturalWidth || sourceEl.width;
+      const vh = sourceEl.videoHeight || sourceEl.naturalHeight || sourceEl.height;
+      if (!vw || !vh || dw <= 0 || dh <= 0) return;
+      const scale = Math.max(dw / vw, dh / vh), w = vw * scale, h = vh * scale;
+      ctx.drawImage(sourceEl, dx + (dw - w) / 2, dy + (dh - h) / 2, w, h);
+    }
+
+    function renderStageToCanvas() {
+      const stageEl = document.getElementById("stage");
+      if (!stageEl) return null;
+      const stageRect = stageEl.getBoundingClientRect();
+      const w = Math.max(640, Math.round(stageRect.width || 1280));
+      const h = Math.max(360, Math.round(stageRect.height || 720));
+      const scale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(w * scale);
+      canvas.height = Math.round(h * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.scale(scale, scale);
+
+      const cs = getComputedStyle(document.documentElement);
+      ctx.fillStyle = cs.getPropertyValue("--bg-page").trim() || "#0f1115";
+      ctx.fillRect(0, 0, w, h);
+
+      const rel = (el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.left - stageRect.left, y: r.top - stageRect.top, w: r.width, h: r.height };
+      };
+
+      if (!screenStage.classList.contains("hidden")) {
+        const sr = rel(screenStage);
+        if (sr.w > 0 && sr.h > 0) {
+          ctx.fillStyle = "#090b0f";
+          ctx.fillRect(sr.x, sr.y, sr.w, sr.h);
+          ctx.fillStyle = "#93c5fd";
+          ctx.font = "600 13px system-ui, sans-serif";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "top";
+          ctx.fillText(screenStageLabel.textContent || "Screen Share", sr.x + 12, sr.y + 8);
+          const vid = !screenStageVideo.classList.contains("hidden") ? screenStageVideo : localScreenMirrorVideo;
+          if (vid && vid.readyState >= 2 && vid.videoWidth > 0) {
+            const vr = !screenStageVideo.classList.contains("hidden") ? rel(screenStageVideo) : { x: sr.x + 10, y: sr.y + 30, w: sr.w - 20, h: sr.h - 38 };
+            drawContained(ctx, vid, vr.x, vr.y, Math.max(10, vr.w), Math.max(10, vr.h));
           }
-        });
-
-        try {
-          const captured = await html2canvas(target, {
-            backgroundColor: "#0f1115",
-            scale: Math.min(window.devicePixelRatio || 1, 2),
-            useCORS: true,
-            logging: false,
-            onclone: (clonedDoc) => {
-              ["mobile-view-bar", "stage-footer", "caption-bar", "view-swipe-toast", "reaction-layer"].forEach((id) => {
-                const el = clonedDoc.getElementById(id); if (el) el.style.display = "none";
-              });
-              clonedDoc.querySelectorAll(".tile-actions").forEach((el) => { el.style.display = "none"; });
-              clonedDoc.querySelectorAll("video[data-snap-idx]").forEach((clonedVid) => {
-                const c = videoCanvases.get(clonedVid.dataset.snapIdx);
-                if (c && clonedVid.parentNode) {
-                  c.style.cssText = "position:relative; z-index:0; width:100%; height:100%; display:block; background:#000;";
-                  clonedVid.parentNode.replaceChild(c, clonedVid);
-                }
-              });
-            }
-          });
-          videos.forEach((v) => delete v.dataset.snapIdx);
-
-          captured.toBlob(async (blob) => {
-            if (!blob) return;
-            let copied = false;
-            if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
-              try { await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]); copied = true; } catch {}
-            }
-            const url = URL.createObjectURL(blob), a = document.createElement("a");
-            a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 4000);
-            showNoticeBanner(copied ? "📸 Snapshot saved & copied to clipboard!" : "📸 Snapshot saved to Downloads!", "approved", 3000);
-          }, "image/png");
-          return;
-        } catch { videos.forEach((v) => delete v.dataset.snapIdx); }
+        }
       }
-      showNoticeBanner("⚠️ Could not capture snapshot.", "denied", 3000);
+
+      if (wbOpen && !whiteboardStage.classList.contains("hidden")) {
+        const wr = rel(wbCanvas);
+        if (wr.w > 0 && wr.h > 0) {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(wr.x, wr.y, wr.w, wr.h);
+          ctx.drawImage(wbCanvas, wr.x, wr.y, wr.w, wr.h);
+        }
+      }
+
+      const tiles = Array.from(videoGrid.querySelectorAll(".video-tile:not(.page-hidden)"));
+      for (const tile of tiles) {
+        const r = rel(tile);
+        if (r.w <= 4 || r.h <= 4 || r.y + r.h < 0 || r.y > h) continue;
+        const isSpeaking = tile.classList.contains("speaking");
+
+        ctx.save();
+        drawRoundedRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+        ctx.clip();
+
+        ctx.fillStyle = cs.getPropertyValue("--bg-surface").trim() || "#181b22";
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+
+        const vid = tile.querySelector("video"), ph = tile.querySelector(".placeholder");
+        if (vid && ph && ph.classList.contains("hidden") && vid.readyState >= 2 && vid.videoWidth > 0) {
+          drawCovered(ctx, vid, r.x, r.y, r.w, r.h);
+        } else {
+          const avImg = ph?.querySelector(".avatar-circle img");
+          const avText = ph?.querySelector(".avatar-circle")?.textContent?.trim() || "U";
+          const phText = ph?.querySelector(".ph-text")?.textContent?.trim() || "Camera Off";
+          const rad = Math.min(34, Math.max(16, Math.min(r.w, r.h) * 0.2));
+          const cx = r.x + r.w / 2, cy = r.y + r.h / 2 - 10;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+          ctx.clip();
+          if (avImg && avImg.complete && avImg.naturalWidth > 0) {
+            drawCovered(ctx, avImg, cx - rad, cy - rad, rad * 2, rad * 2);
+          } else {
+            ctx.fillStyle = isSpeaking ? "#16a34a" : "#2563eb";
+            ctx.fillRect(cx - rad, cy - rad, rad * 2, rad * 2);
+            ctx.fillStyle = "#ffffff";
+            ctx.font = `700 ${Math.round(rad * 0.72)}px system-ui, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(avText.slice(0, 2).toUpperCase(), cx, cy);
+          }
+          ctx.restore();
+
+          ctx.beginPath();
+          ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = isSpeaking ? "#4ade80" : "#3b82f6";
+          ctx.stroke();
+
+          ctx.fillStyle = cs.getPropertyValue("--text-muted").trim() || "#a1a1aa";
+          ctx.font = "500 12px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillText(phText, cx, cy + rad + 6);
+        }
+
+        const labelText = tile.querySelector(".label")?.textContent?.trim() || "";
+        if (labelText) {
+          ctx.font = "600 12px system-ui, sans-serif";
+          const tw = Math.min(r.w - 24, ctx.measureText(labelText).width + 16);
+          ctx.fillStyle = isSpeaking ? "rgba(22, 163, 74, 0.92)" : "rgba(0, 0, 0, 0.74)";
+          drawRoundedRectPath(ctx, r.x + 8, r.y + r.h - 28, tw, 21, 6);
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          ctx.fillText(labelText, r.x + 16, r.y + r.h - 17.5, Math.max(20, tw - 16));
+        }
+        ctx.restore();
+
+        drawRoundedRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = isSpeaking ? "#22c55e" : (cs.getPropertyValue("--border").trim() || "#2b303b");
+        ctx.stroke();
+      }
+      return canvas;
+    }
+
+    function takeStageScreenshot() {
+      try {
+        const canvas = renderStageToCanvas();
+        if (!canvas) { showNoticeBanner("⚠️ Could not capture snapshot.", "denied", 3000); return; }
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        downloadCanvasPng(canvas, `meeting-snapshot-${currentRoomId || "meeting"}-${stamp}.png`, true);
+      } catch (err) {
+        showNoticeBanner(`⚠️ Snapshot failed: ${err?.message || err}`, "denied", 3500);
+      }
     }
     snapshotBtn.onclick = () => { controlsDock.classList.remove("more-open"); takeStageScreenshot(); };
 
@@ -1463,10 +1612,20 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       updateUnreadBadges();
     };
     closeParticipantsBtn.onclick = () => { participantsPanel.classList.add("hidden"); };
-    closeChatBtn.onclick = () => { chatPanel.classList.add("hidden"); updateUnreadBadges(); };
+    closeChatBtn.onclick = () => { chatPanel.classList.add("hidden"); emojiPicker.classList.add("hidden"); updateUnreadBadges(); };
 
     function openRecordingPlayer(title, url) { playerTitle.textContent = title; playerVideo.src = url; playerModal.classList.remove("hidden"); }
     playerCloseBtn.onclick = () => { playerVideo.pause(); playerVideo.removeAttribute("src"); playerVideo.load(); playerModal.classList.add("hidden"); };
+
+    function openImageLightbox(title, url, downloadUrl) {
+      imgLightboxTitle.textContent = title || "Image";
+      imgLightboxImg.src = url;
+      imgLightboxDownload.href = downloadUrl || url;
+      imgLightboxDownload.download = title || "image.png";
+      imgLightbox.classList.remove("hidden");
+    }
+    imgLightboxClose.onclick = () => { imgLightboxImg.removeAttribute("src"); imgLightbox.classList.add("hidden"); };
+    imgLightbox.onclick = (e) => { if (e.target === imgLightbox) imgLightboxClose.click(); };
 
     function isScreenFullscreen() { const fsEl = document.fullscreenElement || document.webkitFullscreenElement; return fsEl === screenStage || fsEl === screenStageVideo; }
     function applyHighQualityScreenShare() {
@@ -1868,19 +2027,174 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       activeChatTab = tab; const isPub = tab === "public";
       tabPublic.classList.toggle("active-tab", isPub); tabPrivate.classList.toggle("active-tab", !isPub);
       publicMessages.classList.toggle("hidden", !isPub); privateMessages.classList.toggle("hidden", isPub);
-      dmBar.classList.toggle("hidden", isPub); chatInput.placeholder = isPub ? "Message everyone..." : "Send a private message...";
+      dmBar.classList.toggle("hidden", isPub); chatInput.placeholder = isPub ? "Message everyone (or Ctrl+V image)..." : "Private message (or Ctrl+V image)...";
       if (isPub) unreadPublic = 0; else unreadPrivate = 0; updateUnreadBadges();
     }
     tabPublic.onclick = () => switchChatTab("public"); tabPrivate.onclick = () => switchChatTab("private");
     toggleChatBtn.onclick = () => {
       const opening = chatPanel.classList.contains("hidden"); chatPanel.classList.toggle("hidden", !opening);
       if (opening) { participantsPanel.classList.add("hidden"); controlsDock.classList.remove("more-open"); syncPeersFromLiveKit(); if (activeChatTab === "public") unreadPublic = 0; else unreadPrivate = 0; }
+      else emojiPicker.classList.add("hidden");
       updateUnreadBadges();
     };
-    function appendChatMessage({ container, senderName, text, isSelf, isDm = false, dmLabel = "", replyToId = null }) {
+
+    function formatFileSize(bytes) {
+      const b = Number(bytes || 0);
+      if (b < 1024) return `${b} B`;
+      if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+      return `${(b / (1024 * 1024)).toFixed(2)} MB`;
+    }
+    function getFileIcon(mime, filename) {
+      const m = (mime || "").toLowerCase(), n = (filename || "").toLowerCase();
+      if (m.startsWith("image/")) return "🖼️";
+      if (m === "application/pdf" || n.endsWith(".pdf")) return "📄";
+      if (m.startsWith("video/") || /\.(mp4|webm|mov|mkv)$/.test(n)) return "🎬";
+      if (m.startsWith("audio/") || /\.(mp3|wav|ogg|m4a)$/.test(n)) return "🎵";
+      if (/\.(zip|rar|7z|tar|gz)$/.test(n)) return "🗜️";
+      if (/\.(xls|xlsx|csv)$/.test(n)) return "📊";
+      if (/\.(doc|docx|txt|md|rtf)$/.test(n)) return "📝";
+      return "📎";
+    }
+    function buildEmojiPicker() {
+      const grid = document.createElement("div"); grid.className = "emoji-grid";
+      for (const em of CHAT_EMOJIS) {
+        const btn = document.createElement("button"); btn.type = "button"; btn.className = "emoji-opt"; btn.textContent = em;
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const start = chatInput.selectionStart ?? chatInput.value.length;
+          const end = chatInput.selectionEnd ?? chatInput.value.length;
+          chatInput.value = chatInput.value.slice(0, start) + em + chatInput.value.slice(end);
+          const pos = start + em.length;
+          chatInput.focus();
+          try { chatInput.setSelectionRange(pos, pos); } catch {}
+        };
+        grid.appendChild(btn);
+      }
+      emojiPicker.appendChild(grid);
+    }
+    buildEmojiPicker();
+    chatEmojiBtn.onclick = (e) => { e.stopPropagation(); emojiPicker.classList.toggle("hidden"); };
+    document.addEventListener("click", (e) => { if (!emojiPicker.classList.contains("hidden") && !emojiPicker.contains(e.target) && e.target !== chatEmojiBtn) emojiPicker.classList.add("hidden"); });
+
+    function renderPendingAttachments() {
+      chatAttachPreview.innerHTML = "";
+      chatAttachPreview.classList.toggle("hidden", pendingChatFiles.length === 0);
+      pendingChatFiles.forEach((item, idx) => {
+        const chip = document.createElement("div"); chip.className = "attach-chip";
+        if (item.previewUrl) {
+          const img = document.createElement("img"); img.src = item.previewUrl; img.alt = item.file.name; chip.appendChild(img);
+        } else {
+          const ico = document.createElement("span"); ico.style.fontSize = "1.15rem"; ico.textContent = getFileIcon(item.file.type, item.file.name); chip.appendChild(ico);
+        }
+        const meta = document.createElement("div"); meta.className = "attach-chip-meta";
+        meta.innerHTML = `<span class="attach-chip-name">${escapeHtml(item.file.name)}</span><span class="attach-chip-size">${formatFileSize(item.file.size)}</span>`;
+        const rm = document.createElement("button"); rm.type = "button"; rm.className = "attach-chip-rm"; rm.textContent = "✕"; rm.title = "Remove";
+        rm.onclick = () => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); pendingChatFiles.splice(idx, 1); renderPendingAttachments(); };
+        chip.appendChild(meta); chip.appendChild(rm); chatAttachPreview.appendChild(chip);
+      });
+    }
+    function clearPendingAttachments() {
+      pendingChatFiles.forEach(it => { if (it.previewUrl) URL.revokeObjectURL(it.previewUrl); });
+      pendingChatFiles = [];
+      renderPendingAttachments();
+    }
+    function addPendingFiles(fileList) {
+      const files = Array.from(fileList || []);
+      for (const file of files) {
+        if (file.size > 25 * 1024 * 1024) { showNoticeBanner(`⚠️ "${file.name}" exceeds the 25 MB chat file limit.`, "denied", 4000); continue; }
+        if (pendingChatFiles.length >= 6) { showNoticeBanner("⚠️ Max 6 attachments per message.", "denied", 3000); break; }
+        const previewUrl = (file.type || "").startsWith("image/") ? URL.createObjectURL(file) : null;
+        pendingChatFiles.push({ file, previewUrl });
+      }
+      renderPendingAttachments();
+    }
+    chatAttachBtn.onclick = () => chatFileInput.click();
+    chatFileInput.onchange = (e) => { addPendingFiles(e.target.files); chatFileInput.value = ""; chatInput.focus(); };
+
+    function handleChatPaste(e) {
+      const cd = e.clipboardData; if (!cd) return;
+      const pastedFiles = [];
+      if (cd.items) {
+        for (const item of cd.items) {
+          if (item.kind === "file") {
+            const f = item.getAsFile();
+            if (f) {
+              const ext = (f.type && f.type.split("/")[1]) ? f.type.split("/")[1].replace(/[^a-z0-9]/gi, "") : "png";
+              const named = (!f.name || f.name === "image.png") ? new File([f], `screenshot-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.${ext || "png"}`, { type: f.type || "image/png" }) : f;
+              pastedFiles.push(named);
+            }
+          }
+        }
+      } else if (cd.files?.length) {
+        for (const f of cd.files) pastedFiles.push(f);
+      }
+      if (pastedFiles.length > 0) {
+        e.preventDefault();
+        addPendingFiles(pastedFiles);
+        showNoticeBanner(`📋 Pasted ${pastedFiles.length} image/file into chat — press Send!`, "approved", 2200);
+      }
+    }
+    chatInput.addEventListener("paste", handleChatPaste);
+    chatPanel.addEventListener("paste", (e) => { if (e.target !== chatInput) handleChatPaste(e); });
+    chatPanel.addEventListener("dragover", (e) => { e.preventDefault(); chatPanel.classList.add("drag-over"); });
+    chatPanel.addEventListener("dragleave", () => { chatPanel.classList.remove("drag-over"); });
+    chatPanel.addEventListener("drop", (e) => { e.preventDefault(); chatPanel.classList.remove("drag-over"); if (e.dataTransfer?.files?.length) { addPendingFiles(e.dataTransfer.files); chatInput.focus(); } });
+
+    async function uploadChatFile(file) {
+      const resp = await fetch(`/api/chat-files/${encodeURIComponent(currentRoomId)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+          "X-Client-Id": clientId,
+          "X-File-Name": encodeURIComponent(file.name || "attachment"),
+          "X-File-Type": file.type || "application/octet-stream"
+        },
+        body: file
+      });
+      if (!resp.ok) {
+        let msg = "Upload failed";
+        try { msg = (await resp.json()).detail || msg; } catch {}
+        throw new Error(msg);
+      }
+      return await resp.json();
+    }
+
+    function appendChatMessage({ container, senderName, text = "", attachments = [], isSelf, isDm = false, dmLabel = "", replyToId = null }) {
       const item = document.createElement("div"); item.className = `msg-item${isSelf ? " self" : ""}${isDm ? " dm" : ""}`;
-      item.innerHTML = `<div class="msg-meta">${isDm ? `<span class="dm-tag">${escapeHtml(dmLabel)}</span>` : ""}${escapeHtml(senderName)} • ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div><div class="msg-bubble">${escapeHtml(text)}</div>`;
+      const metaEl = document.createElement("div"); metaEl.className = "msg-meta";
+      metaEl.innerHTML = `${isDm ? `<span class="dm-tag">${escapeHtml(dmLabel)}</span>` : ""}${escapeHtml(senderName)} • ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      const bubble = document.createElement("div"); bubble.className = "msg-bubble";
+      if (text) {
+        const textEl = document.createElement("div");
+        textEl.textContent = text;
+        bubble.appendChild(textEl);
+      }
+      if (Array.isArray(attachments) && attachments.length > 0) {
+        const attWrap = document.createElement("div"); attWrap.className = `msg-attachments${text ? "" : " no-text"}`;
+        for (const att of attachments) {
+          const viewUrl = att.url;
+          const dlUrl = `${viewUrl}${viewUrl.includes("?") ? "&" : "?"}download=1`;
+          const isImg = (att.mime_type || "").startsWith("image/");
+          const isPdf = (att.mime_type || "") === "application/pdf" || (att.filename || "").toLowerCase().endsWith(".pdf");
+          if (isImg) {
+            const imgWrap = document.createElement("div"); imgWrap.className = "msg-img-wrap";
+            const img = document.createElement("img"); img.className = "msg-img-thumb"; img.src = viewUrl; img.alt = att.filename || "Image"; img.loading = "lazy";
+            img.onclick = (e) => { e.stopPropagation(); openImageLightbox(att.filename || "Image", viewUrl, dlUrl); };
+            const sub = document.createElement("div"); sub.className = "row"; sub.style.justifyContent = "space-between";
+            sub.innerHTML = `<span style="font-size:0.72rem;opacity:0.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px;">${escapeHtml(att.filename || "image")}</span><a class="btn-link secondary" style="padding:0.2rem 0.45rem;font-size:0.7rem;" href="${escapeHtml(dlUrl)}" download="${escapeHtml(att.filename || "image")}">⬇️</a>`;
+            sub.querySelector("a").onclick = (e) => e.stopPropagation();
+            imgWrap.appendChild(img); imgWrap.appendChild(sub); attWrap.appendChild(imgWrap);
+          } else {
+            const card = document.createElement("div"); card.className = "msg-file-card";
+            card.innerHTML = `<span style="font-size:1.25rem;">${getFileIcon(att.mime_type, att.filename)}</span><div class="msg-file-info"><span class="msg-file-name" title="${escapeHtml(att.filename || "file")}">${escapeHtml(att.filename || "file")}</span><span class="msg-file-size">${formatFileSize(att.size)}</span></div><div class="msg-file-actions">${isPdf ? `<a class="btn-link" href="${escapeHtml(viewUrl)}" target="_blank" rel="noopener">👁️ View</a>` : ""}<a class="btn-link secondary" href="${escapeHtml(dlUrl)}" download="${escapeHtml(att.filename || "file")}">⬇️</a></div>`;
+            card.querySelectorAll("a").forEach(a => { a.onclick = (e) => e.stopPropagation(); });
+            attWrap.appendChild(card);
+          }
+        }
+        bubble.appendChild(attWrap);
+      }
       if (isDm && !isSelf && replyToId && peerNames[replyToId]) { item.title = "Click to reply privately"; item.onclick = () => { dmTarget.value = replyToId; chatInput.focus(); }; }
+      item.appendChild(metaEl); item.appendChild(bubble);
       container.appendChild(item); container.scrollTop = container.scrollHeight;
     }
 
@@ -1897,11 +2211,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       } else if (msg.type === "caption") { displayCaption(senderName, msg.text); }
       else if (msg.type === "reaction") { showReaction(msg.emoji, senderName, senderId); }
       else if (msg.type === "chat_public") {
-        appendChatMessage({ container: publicMessages, senderName, text: msg.text, isSelf: false });
+        appendChatMessage({ container: publicMessages, senderName, text: msg.text || "", attachments: msg.attachments || [], isSelf: false });
         if (chatPanel.classList.contains("hidden") || activeChatTab !== "public") { unreadPublic++; updateUnreadBadges(); }
       } else if (msg.type === "chat_private") {
         if (msg.target && msg.target !== clientId) return;
-        appendChatMessage({ container: privateMessages, senderName, text: msg.text, isSelf: false, isDm: true, dmLabel: "Private", replyToId: senderId });
+        appendChatMessage({ container: privateMessages, senderName, text: msg.text || "", attachments: msg.attachments || [], isSelf: false, isDm: true, dmLabel: "Private", replyToId: senderId });
         if (chatPanel.classList.contains("hidden") || activeChatTab !== "private") { unreadPrivate++; updateUnreadBadges(); }
       }
     }
@@ -1914,16 +2228,38 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         try { const bytes = new TextEncoder().encode(JSON.stringify(fullPayload)), opts = { reliable: true }; if (targetId) opts.destinationIdentities = [targetId]; lkRoom.localParticipant.publishData(bytes, opts).catch(() => {}); } catch {}
       }
     }
-    function sendChatMessage() {
-      const text = chatInput.value.trim(); if (!text) return;
-      if (activeChatTab === "public") { sendRoomData({ type: "chat_public", text }); appendChatMessage({ container: publicMessages, senderName: `${getDisplayName()} (You)`, text, isSelf: true }); }
-      else {
-        const targetId = dmTarget.value; if (!targetId || !peerNames[targetId]) return alert("Select a participant to send a personal message.");
-        sendRoomData({ type: "chat_private", text }, targetId); appendChatMessage({ container: privateMessages, senderName: "You", text, isSelf: true, isDm: true, dmLabel: `To ${peerNames[targetId]}` });
+    async function sendChatMessage() {
+      if (isSendingChat) return;
+      const text = chatInput.value.trim();
+      const filesToSend = [...pendingChatFiles];
+      if (!text && filesToSend.length === 0) return;
+      if (activeChatTab === "private" && (!dmTarget.value || !peerNames[dmTarget.value])) return alert("Select a participant to send a personal message.");
+
+      isSendingChat = true; sendChatBtn.disabled = true;
+      let uploadedAttachments = [];
+      try {
+        if (filesToSend.length > 0) {
+          sendChatBtn.textContent = "Uploading...";
+          for (const item of filesToSend) uploadedAttachments.push(await uploadChatFile(item.file));
+        }
+        if (activeChatTab === "public") {
+          sendRoomData({ type: "chat_public", text, attachments: uploadedAttachments });
+          appendChatMessage({ container: publicMessages, senderName: `${getDisplayName()} (You)`, text, attachments: uploadedAttachments, isSelf: true });
+        } else {
+          const targetId = dmTarget.value;
+          sendRoomData({ type: "chat_private", text, attachments: uploadedAttachments }, targetId);
+          appendChatMessage({ container: privateMessages, senderName: "You", text, attachments: uploadedAttachments, isSelf: true, isDm: true, dmLabel: `To ${peerNames[targetId]}` });
+        }
+        chatInput.value = "";
+        clearPendingAttachments();
+        emojiPicker.classList.add("hidden");
+      } catch (err) {
+        showNoticeBanner(`❌ Attachment upload failed: ${err?.message || err}`, "denied", 4000);
+      } finally {
+        isSendingChat = false; sendChatBtn.disabled = false; sendChatBtn.textContent = "Send";
       }
-      chatInput.value = "";
     }
-    sendChatBtn.onclick = sendChatMessage; chatInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendChatMessage(); });
+    sendChatBtn.onclick = sendChatMessage; chatInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } });
 
     function showReaction(emoji, senderName, tileId) {
       const el = document.createElement("div"); el.className = "floating-reaction"; el.style.left = `${15 + Math.random() * 70}%`;
@@ -2293,6 +2629,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       currentRoomId = roomId; currentMeetingTitle = title || `Room ${roomId}`;
       isLeavingCall = false; wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; speakerMuted = false; hasJoinedRoom = false; rejoinToken = "";
       waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null; appliedTrackQuality.clear();
+      clearPendingAttachments(); emojiPicker.classList.add("hidden");
       syncMeetingCountdown(null, null);
       pinnedTileId = null; lastActiveSpeakerTileId = null; lastSpeakingKey = ""; lkSpeakingIds.clear(); seenMsgIds.clear();
       wbOpen = false; wbLocked = false; wbHistory = []; redrawWhiteboard();
@@ -2406,6 +2743,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     leaveBtn.onclick = async () => {
       isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); wsPingTimer = null;
       clearInterval(realtimeSyncTimer); realtimeSyncTimer = null; appliedTrackQuality.clear();
+      clearPendingAttachments(); emojiPicker.classList.add("hidden"); imgLightboxClose.click();
       syncMeetingCountdown(null, null);
       await exitFloatingPip(); stopPipStream(); stopBackgroundKeepalive(); await releaseWakeLock();
       clearTimeout(participantsRenderTimer); participantsRenderTimer = null; clearTimeout(dmRefreshTimer); dmRefreshTimer = null;
@@ -2550,6 +2888,21 @@ def mint_livekit_token(room_id: str, client_id: str, name: str, is_host: bool) -
     )
 
 
+def cleanup_room_resources(room_id: str):
+    meta = room_meta.pop(room_id, None)
+    rooms.pop(room_id, None)
+    waiting_rooms.pop(room_id, None)
+    if meta:
+        timer_task = meta.get("timer_task")
+        if timer_task and not timer_task.done():
+            timer_task.cancel()
+        for finfo in meta.get("chat_files", {}).values():
+            try:
+                Path(finfo["path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 class MeetingCreate(BaseModel):
     title: str = "Instant Meeting"
     host_name: str = "Host"
@@ -2621,6 +2974,72 @@ async def delete_meeting(meeting_id: str, request: Request):
         if conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,)).rowcount == 0:
             raise HTTPException(status_code=404, detail="Meeting not found")
     return {"deleted": True}
+
+
+@app.post("/api/chat-files/{room_id}")
+async def upload_chat_file(room_id: str, request: Request):
+    sender_id = request.headers.get("x-client-id", "")
+    if room_id not in rooms or sender_id not in rooms[room_id]:
+        raise HTTPException(status_code=403, detail="Join the meeting room before uploading chat files.")
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(data) > MAX_CHAT_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 25 MB limit.")
+    raw_name = unquote(request.headers.get("x-file-name", "attachment"))
+    orig_name = Path(raw_name).name.replace('"', "").strip() or "attachment"
+    orig_name = orig_name[:120]
+    req_mime = (request.headers.get("x-file-type") or "").split(";")[0].strip().lower()
+    guessed_mime = (mimetypes.guess_type(orig_name)[0] or "").lower()
+    mime_type = req_mime if (req_mime and req_mime != "application/octet-stream") else (guessed_mime or "application/octet-stream")
+
+    safe_room = "".join(c for c in room_id if c.isalnum() or c in "-_") or "room"
+    safe_disk = "".join(c for c in orig_name if c.isalnum() or c in "._-") or "file"
+    file_id = secrets.token_hex(8)
+    file_token = secrets.token_urlsafe(12)
+    file_path = CHAT_UPLOADS_DIR / f"{safe_room}_{file_id}_{safe_disk}"
+    file_path.write_bytes(data)
+
+    room_meta[room_id].setdefault("chat_files", {})[file_id] = {
+        "path": str(file_path),
+        "filename": orig_name,
+        "mime_type": mime_type,
+        "size": len(data),
+        "token": file_token,
+    }
+    return {
+        "file_id": file_id,
+        "filename": orig_name,
+        "mime_type": mime_type,
+        "size": len(data),
+        "token": file_token,
+        "url": f"/api/chat-files/{room_id}/{file_id}?token={file_token}",
+    }
+
+
+@app.get("/api/chat-files/{room_id}/{file_id}")
+async def get_chat_file(room_id: str, file_id: str, token: str = "", download: int = 0):
+    meta = room_meta.get(room_id)
+    finfo = meta.get("chat_files", {}).get(file_id) if meta else None
+    if not finfo or not token or not secrets.compare_digest(token, finfo["token"]):
+        raise HTTPException(status_code=403, detail="Invalid or expired attachment link.")
+    file_path = Path(finfo["path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+    mime = finfo["mime_type"]
+    safe_hdr = finfo["filename"].replace('"', "'")
+    if not download and mime in SAFE_INLINE_MIME:
+        return FileResponse(
+            file_path,
+            media_type=mime,
+            headers={"Content-Disposition": f'inline; filename="{safe_hdr}"', "X-Content-Type-Options": "nosniff"},
+        )
+    return FileResponse(
+        file_path,
+        media_type=mime if mime in SAFE_INLINE_MIME else "application/octet-stream",
+        filename=finfo["filename"],
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @app.post("/api/recordings/{room_id}")
@@ -2746,6 +3165,7 @@ async def run_meeting_timer(room_id: str):
                         await winfo["ws"].close()
                     except Exception:
                         pass
+                cleanup_room_resources(room_id)
                 return
             if remaining <= 300 and not warned_5m and meta.get("duration_minutes", 0) > 5:
                 warned_5m = True
@@ -2833,6 +3253,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str,
             "ends_at": ends_at,
             "timer_task": asyncio.create_task(run_meeting_timer(room_id)) if ends_at else None,
             "rejoin_tokens": {},
+            "chat_files": {},
             "active_sharer": None, "active_sharer_name": None,
             "approved_sharers": set(), "pending_screen_requests": {},
             "is_recording": False, "recording_by": None,
@@ -3110,9 +3531,4 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, client_id: str,
                 await broadcast_room(room_id, build_policy_payload(room_id))
 
         if room_id in rooms and not rooms[room_id] and not waiting_rooms.get(room_id):
-            timer_task = meta.get("timer_task")
-            if timer_task and not timer_task.done():
-                timer_task.cancel()
-            rooms.pop(room_id, None)
-            waiting_rooms.pop(room_id, None)
-            room_meta.pop(room_id, None)
+            cleanup_room_resources(room_id)
