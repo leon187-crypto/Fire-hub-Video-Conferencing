@@ -46,6 +46,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <title>Fire-Hub Video Conference</title>
   <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/yusitnikov/fix-webm-duration/fix-webm-duration.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
   <style>
     :root {
       --bg-page: #0f1115;
@@ -143,8 +144,17 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .meeting-title { font-weight: 600; font-size: 1rem; word-break: break-word; }
     .meeting-sub { font-size: 0.82rem; color: var(--text-muted); word-break: break-word; }
     .link-box { background: var(--bg-input); border: 1px dashed #3b82f6; padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 0.85rem; word-break: break-all; color: var(--link-color); }
-    #player-modal, #img-lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.86); z-index: 65; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    #player-modal, #img-lightbox, #cam-fx-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.82); z-index: 65; display: flex; align-items: center; justify-content: center; padding: 1rem; }
     .player-box { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 12px; padding: 1rem; width: min(95vw, 960px); display: flex; flex-direction: column; gap: 0.75rem; }
+    .fx-box { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 14px; padding: 1rem; width: min(96vw, 560px); max-height: 90dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.85rem; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5); }
+    .fx-preview-wrap { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #090b0f; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; }
+    #fx-preview-video { width: 100%; height: 100%; object-fit: cover; }
+    .fx-preview-off { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 0.45rem; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.85rem; background: rgba(9, 11, 15, 0.85); }
+    .fx-status-pill { position: absolute; top: 8px; right: 8px; background: rgba(0, 0, 0, 0.74); color: #e4e4e7; padding: 3px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; }
+    .fx-section-title { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 0.35rem; }
+    .fx-grid { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .fx-chip { padding: 0.38rem 0.65rem; font-size: 0.8rem; border-radius: 8px; background: var(--btn-sec-bg); color: var(--btn-sec-text); border: 1px solid transparent; }
+    .fx-chip.active-fx { background: #2563eb; color: #fff; border-color: #93c5fd; }
     .player-header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
     #player-video { width: 100%; max-height: 75dvh; background: #000; border-radius: 8px; }
     #img-lightbox-img { max-width: 100%; max-height: 75dvh; object-fit: contain; border-radius: 8px; background: #000; margin: 0 auto; }
@@ -408,6 +418,63 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <div id="player-modal" class="hidden"><div class="player-box"><div class="player-header"><strong id="player-title">Recording</strong><button id="player-close-btn" class="danger" style="padding: 0.35rem 0.75rem;">✕ Close</button></div><video id="player-video" controls autoplay playsinline></video></div></div>
   <div id="img-lightbox" class="hidden"><div class="player-box"><div class="player-header"><strong id="img-lightbox-title">Image Preview</strong><div class="row"><a id="img-lightbox-download" class="btn-link" href="#" download>⬇️ Download</a><button id="img-lightbox-close" class="danger" type="button" style="padding: 0.35rem 0.75rem;">✕ Close</button></div></div><img id="img-lightbox-img" alt="Preview" /></div></div>
 
+  <div id="cam-fx-modal" class="hidden">
+    <div class="fx-box">
+      <div class="player-header"><strong>🎭 Camera Background, Styles & Effects (No Green Screen)</strong><button id="fx-close-btn" class="danger" type="button" style="padding: 0.32rem 0.7rem;">✕ Close</button></div>
+      <div class="fx-preview-wrap">
+        <video id="fx-preview-video" autoplay playsinline muted></video>
+        <div id="fx-preview-off" class="fx-preview-off"><span>📷 Camera is currently off</span><button id="fx-toggle-cam-btn" class="active" type="button">Enable Camera to Preview</button></div>
+        <span id="fx-status-pill" class="fx-status-pill hidden">Ready</span>
+      </div>
+      <div>
+        <div class="fx-section-title">1. Virtual Background (AI Auto-Cutout, No Green Screen)</div>
+        <div class="fx-grid" id="fx-bg-grid">
+          <button type="button" class="fx-chip" data-bg="none">🚫 None</button>
+          <button type="button" class="fx-chip" data-bg="blur-soft">🌫️ Soft Blur</button>
+          <button type="button" class="fx-chip" data-bg="blur-strong">🌫️ Strong Blur</button>
+          <button type="button" class="fx-chip" data-bg="office">🏢 Studio Office</button>
+          <button type="button" class="fx-chip" data-bg="neon">🌃 Neon City</button>
+          <button type="button" class="fx-chip" data-bg="sunset">🌅 Sunset</button>
+          <button type="button" class="fx-chip" data-bg="aurora">🌌 Aurora</button>
+          <button type="button" class="fx-chip" data-bg="color">🎨 Color</button>
+          <input id="fx-bg-color-input" type="color" value="#1e3a8a" title="Pick solid background color" style="width:36px;height:32px;padding:2px;border-radius:6px;border:1px solid var(--border-strong);background:var(--bg-input);cursor:pointer;" />
+          <input id="fx-bg-file-input" type="file" accept="image/*" class="hidden" />
+          <button type="button" class="fx-chip" data-bg="custom" id="fx-bg-upload-btn">🖼️ Upload Photo</button>
+        </div>
+      </div>
+      <div>
+        <div class="fx-section-title">2. Camera Style & Color</div>
+        <div class="fx-grid" id="fx-style-grid">
+          <button type="button" class="fx-chip" data-style="none">✨ Normal</button>
+          <button type="button" class="fx-chip" data-style="beauty">🌸 Soft Beauty</button>
+          <button type="button" class="fx-chip" data-style="warm">☀️ Warm Studio</button>
+          <button type="button" class="fx-chip" data-style="cool">❄️ Cool Cinema</button>
+          <button type="button" class="fx-chip" data-style="vivid">🌈 Vivid HD</button>
+          <button type="button" class="fx-chip" data-style="bw">🎬 B&amp;W Noir</button>
+          <button type="button" class="fx-chip" data-style="sepia">📜 Sepia</button>
+          <button type="button" class="fx-chip" data-style="contrast">⚡ Crisp Pop</button>
+        </div>
+      </div>
+      <div>
+        <div class="fx-section-title">3. Live Effects & Frames</div>
+        <div class="fx-grid" id="fx-effect-grid">
+          <button type="button" class="fx-chip" data-effect="none">🚫 None</button>
+          <button type="button" class="fx-chip" data-effect="sparkles">✨ Sparkles</button>
+          <button type="button" class="fx-chip" data-effect="snow">❄️ Snow</button>
+          <button type="button" class="fx-chip" data-effect="confetti">🎉 Confetti</button>
+          <button type="button" class="fx-chip" data-effect="hearts">❤️ Hearts</button>
+          <button type="button" class="fx-chip" data-effect="neon-frame">🟣 Neon Frame</button>
+          <button type="button" class="fx-chip" data-effect="cinema-bars">🎥 Cinema Bars</button>
+          <button type="button" class="fx-chip" data-effect="vignette">🌒 Vignette</button>
+        </div>
+      </div>
+      <div class="row" style="justify-content: space-between; border-top: 1px solid var(--border); padding-top: 0.65rem;">
+        <label class="checkbox-row"><input id="fx-mirror-chk" type="checkbox" /> 🪞 Mirror Camera</label>
+        <button id="fx-reset-btn" class="secondary" type="button">↺ Reset All</button>
+      </div>
+    </div>
+  </div>
+
   <div id="call-view" class="hidden">
     <div id="banner-container"></div>
     <video id="pip-video" autoplay playsinline muted style="position:fixed;width:16px;height:16px;opacity:0.001;pointer-events:none;bottom:0;right:0;z-index:-1;"></video>
@@ -428,6 +495,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         <button id="mobile-more-btn" class="secondary mobile-only" type="button">⋯ More</button>
       </div>
       <div class="secondary-controls">
+        <button id="cam-fx-btn" class="secondary" type="button" title="Change background (no green screen), styles & camera effects">🎭 Cam FX</button>
         <select id="view-mode-select" title="Switch Meeting View"><option value="grid">📐 Grid View</option><option value="speaker">🎤 Speaker View</option><option value="sidebar">◫ Sidebar View</option><option value="compact">🪪 Compact View</option></select>
         <select id="quality-mode-select" title="Video Quality & Smoothness"><option value="auto">🎥 Auto HD (Smooth)</option><option value="hd">🌟 Full HD (1080p Real-Time)</option><option value="saver">📶 Data Saver (360p)</option></select>
         <select id="call-theme-select" title="Appearance Mode"><option value="dark">🌙 Night</option><option value="system">🌓 System</option><option value="light">☀️ Light</option></select>
@@ -446,7 +514,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     <div id="call-body">
       <div id="stage">
         <div id="view-swipe-toast" class="hidden"></div>
-        <div id="join-options-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="modal-avatar-preview" class="avatar-circle large">U</div><h2 id="join-modal-title">Choose Audio & Camera</h2><p>Select how you want to join this meeting. You can switch anytime on screen.</p><div class="join-choice-grid"><button id="modal-mic-btn" class="active join-choice-btn">🎤 Join with Microphone</button><button id="modal-speaker-btn" class="join-choice-btn">🔊 Join with Only Computer Speaker</button></div><hr style="border: 0; border-top: 1px solid var(--border); width: 100%; margin: 0.2rem 0;" /><div class="row" style="justify-content: center; width: 100%;"><button id="modal-cam-btn" class="secondary" style="width: 100%;">📷 Enable Camera</button></div></div></div>
+        <div id="join-options-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="modal-avatar-preview" class="avatar-circle large">U</div><h2 id="join-modal-title">Choose Audio & Camera</h2><p>Select how you want to join this meeting. You can switch anytime on screen.</p><div class="join-choice-grid"><button id="modal-mic-btn" class="active join-choice-btn">🎤 Join with Microphone</button><button id="modal-speaker-btn" class="join-choice-btn">🔊 Join with Only Computer Speaker</button></div><hr style="border: 0; border-top: 1px solid var(--border); width: 100%; margin: 0.2rem 0;" /><div class="row" style="justify-content: center; width: 100%;"><button id="modal-cam-btn" class="secondary" style="flex: 1;">📷 Enable Camera</button><button id="modal-fx-btn" class="secondary" type="button">🎭 BG &amp; Effects</button></div></div></div>
         <div id="waiting-room-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="waiting-avatar-preview" class="avatar-circle large">U</div><div class="spinner"></div><h2>Waiting Room</h2><p id="waiting-room-status">Waiting for the meeting owner to let you in...</p><button id="cancel-waiting-btn" class="danger" style="width: 100%;">Leave Waiting Room</button></div></div>
         <div id="reaction-layer"></div>
         <div id="audio-container" class="hidden"></div>
@@ -537,6 +605,16 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const imgLightboxImg = document.getElementById("img-lightbox-img");
     const imgLightboxDownload = document.getElementById("img-lightbox-download");
     const imgLightboxClose = document.getElementById("img-lightbox-close");
+    const camFxModal = document.getElementById("cam-fx-modal");
+    const fxPreviewVideo = document.getElementById("fx-preview-video");
+    const fxPreviewOff = document.getElementById("fx-preview-off");
+    const fxStatusPill = document.getElementById("fx-status-pill");
+    const fxBgColorInput = document.getElementById("fx-bg-color-input");
+    const fxBgFileInput = document.getElementById("fx-bg-file-input");
+    const fxMirrorChk = document.getElementById("fx-mirror-chk");
+    const fxResetBtn = document.getElementById("fx-reset-btn");
+    const fxToggleCamBtn = document.getElementById("fx-toggle-cam-btn");
+    const fxCloseBtn = document.getElementById("fx-close-btn");
 
     const pipVideo = document.getElementById("pip-video");
     const callTitleText = document.getElementById("call-title-text");
@@ -554,6 +632,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const hostJoinPolicyBtn = document.getElementById("host-join-policy-btn");
     const hostPolicyBtn = document.getElementById("host-policy-btn");
     const hostStopShareBtn = document.getElementById("host-stop-share-btn");
+    const camFxBtn = document.getElementById("cam-fx-btn");
     const viewModeSelect = document.getElementById("view-mode-select");
     const qualityModeSelect = document.getElementById("quality-mode-select");
     const callThemeSelect = document.getElementById("call-theme-select");
@@ -608,6 +687,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const modalMicBtn = document.getElementById("modal-mic-btn");
     const modalSpeakerBtn = document.getElementById("modal-speaker-btn");
     const modalCamBtn = document.getElementById("modal-cam-btn");
+    const modalFxBtn = document.getElementById("modal-fx-btn");
     const waitingRoomOverlay = document.getElementById("waiting-room-overlay");
     const waitingAvatarPreview = document.getElementById("waiting-avatar-preview");
     const waitingRoomStatus = document.getElementById("waiting-room-status");
@@ -661,6 +741,17 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     let isSharingScreen = false, hasJoinedRoom = false, isHost = false;
     let requireScreenApproval = true, requireJoinApproval = false, autoRecordOnJoin = false, isMeetingRecording = false;
     let activeSharer = null, activeSharerName = null, screenRequestPending = false, screenShareApproved = false;
+
+    let camBgMode = localStorage.getItem("vc_cam_bg_mode") || "none";
+    let camBgColor = localStorage.getItem("vc_cam_bg_color") || "#1e3a8a";
+    let camBgCustomUrl = localStorage.getItem("vc_cam_bg_custom") || "";
+    let camStyle = localStorage.getItem("vc_cam_style") || "none";
+    let camEffect = localStorage.getItem("vc_cam_effect") || "none";
+    let camMirror = localStorage.getItem("vc_cam_mirror") === "1";
+    let rawCamStream = null, rawCamVideo = null, fxCanvas = null, fxCtx = null, personCanvas = null, personCtx = null;
+    let segMaskCanvas = null, segMaskCtx = null, fxStream = null, fxWorker = null, fxWorkerUrl = null, fxLoopTimer = null;
+    let selfieSeg = null, segReady = false, segBusy = false, segInitPromise = null, customBgImg = null;
+    const presetBgCache = {}, fxParticles = [];
 
     let wbOpen = false, wbLocked = false, wbTool = "pen", wbColor = "#111827", wbHistory = [];
     let wbIsDrawing = false, wbCurrentStroke = null, wbLastPoint = null, wbLastLiveSentAt = 0;
@@ -2354,32 +2445,391 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (captionsEnabled) startWhisperCaptions(); syncWhisperAudioTracks(); updateControlButtons(); updateMediaSession();
     }
 
+    function needsFxPipeline() { return camBgMode !== "none" || camStyle !== "none" || camEffect !== "none" || camMirror; }
+    function needsSegmentation() { return camBgMode !== "none"; }
+    function saveCamFxPrefs() {
+      try {
+        localStorage.setItem("vc_cam_bg_mode", camBgMode);
+        localStorage.setItem("vc_cam_bg_color", camBgColor);
+        localStorage.setItem("vc_cam_style", camStyle);
+        localStorage.setItem("vc_cam_effect", camEffect);
+        localStorage.setItem("vc_cam_mirror", camMirror ? "1" : "0");
+      } catch {}
+    }
+    function loadCustomBgImage(dataUrl) {
+      if (!dataUrl) { customBgImg = null; return; }
+      const img = new Image();
+      img.onload = () => { customBgImg = img; };
+      img.src = dataUrl;
+    }
+    if (camBgCustomUrl) loadCustomBgImage(camBgCustomUrl);
+
+    function getStyleCssFilter(style) {
+      switch (style) {
+        case "beauty": return "brightness(1.07) contrast(0.96) saturate(1.1) sepia(0.05)";
+        case "warm": return "sepia(0.18) saturate(1.2) brightness(1.04)";
+        case "cool": return "hue-rotate(10deg) saturate(1.06) brightness(1.02) contrast(1.06)";
+        case "vivid": return "saturate(1.42) contrast(1.12) brightness(1.03)";
+        case "bw": return "grayscale(1) contrast(1.18) brightness(1.03)";
+        case "sepia": return "sepia(0.85) contrast(1.06) brightness(0.98)";
+        case "contrast": return "contrast(1.3) saturate(1.12)";
+        default: return "none";
+      }
+    }
+
+    function getPresetBgCanvas(name, w, h) {
+      const key = `${name}:${w}x${h}`;
+      if (presetBgCache[key]) return presetBgCache[key];
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      if (name === "office") {
+        const g = ctx.createLinearGradient(0, 0, w, h);
+        g.addColorStop(0, "#1e293b"); g.addColorStop(0.55, "#334155"); g.addColorStop(1, "#0f172a");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.06)"; ctx.fillRect(w * 0.08, h * 0.1, w * 0.28, h * 0.65);
+        ctx.fillStyle = "rgba(147, 197, 253, 0.12)"; ctx.fillRect(w * 0.1, h * 0.12, w * 0.24, h * 0.61);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.04)"; ctx.fillRect(w * 0.65, h * 0.18, w * 0.28, h * 0.04); ctx.fillRect(w * 0.65, h * 0.42, w * 0.28, h * 0.04);
+        ctx.fillStyle = "rgba(180, 120, 70, 0.28)"; ctx.fillRect(0, h * 0.82, w, h * 0.18);
+      } else if (name === "neon") {
+        const g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, "#090218"); g.addColorStop(0.55, "#1e0b36"); g.addColorStop(1, "#06112b");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+        for (let i = 0; i < 10; i++) {
+          ctx.beginPath(); ctx.arc(((i * 173) % w), ((i * 97) % (h * 0.7)), 30 + (i % 4) * 28, 0, Math.PI * 2);
+          ctx.fillStyle = i % 2 === 0 ? "rgba(236, 72, 153, 0.16)" : "rgba(34, 211, 238, 0.16)"; ctx.fill();
+        }
+        ctx.strokeStyle = "rgba(34, 211, 238, 0.28)"; ctx.lineWidth = 2;
+        for (let y = h * 0.62; y < h; y += 28) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+        for (let x = -w; x < w * 2; x += 90) { ctx.beginPath(); ctx.moveTo(w / 2, h * 0.62); ctx.lineTo(x, h); ctx.stroke(); }
+      } else if (name === "sunset") {
+        const g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, "#311042"); g.addColorStop(0.4, "#be185d"); g.addColorStop(0.68, "#f97316"); g.addColorStop(0.7, "#1e1b4b"); g.addColorStop(1, "#0f172a");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+        ctx.beginPath(); ctx.arc(w * 0.72, h * 0.45, Math.min(w, h) * 0.14, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(254, 240, 138, 0.85)"; ctx.fill();
+      } else {
+        const g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, "#020617"); g.addColorStop(0.6, "#0f172a"); g.addColorStop(1, "#022c22");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+        const a1 = ctx.createRadialGradient(w * 0.3, h * 0.3, 10, w * 0.35, h * 0.35, w * 0.5);
+        a1.addColorStop(0, "rgba(52, 211, 153, 0.45)"); a1.addColorStop(0.5, "rgba(167, 139, 250, 0.25)"); a1.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = a1; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = "rgba(255,255,255,0.75)";
+        for (let i = 0; i < 55; i++) { ctx.fillRect((i * 199) % w, (i * 83) % (h * 0.75), (i % 3) + 1, (i % 3) + 1); }
+      }
+      presetBgCache[key] = c;
+      return c;
+    }
+
+    function ensureSelfieSegmentation() {
+      if (selfieSeg) return Promise.resolve(selfieSeg);
+      if (segInitPromise) return segInitPromise;
+      if (typeof SelfieSegmentation === "undefined") { updateFxModalUI(); return Promise.resolve(null); }
+      segInitPromise = (async () => {
+        try {
+          const seg = new SelfieSegmentation({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
+          });
+          seg.setOptions({ modelSelection: 1 });
+          seg.onResults((results) => {
+            segBusy = false;
+            if (!results?.segmentationMask) return;
+            if (!segMaskCanvas) { segMaskCanvas = document.createElement("canvas"); segMaskCtx = segMaskCanvas.getContext("2d"); }
+            const mw = results.segmentationMask.width || 256, mh = results.segmentationMask.height || 144;
+            if (segMaskCanvas.width !== mw || segMaskCanvas.height !== mh) { segMaskCanvas.width = mw; segMaskCanvas.height = mh; }
+            segMaskCtx.clearRect(0, 0, mw, mh);
+            segMaskCtx.drawImage(results.segmentationMask, 0, 0, mw, mh);
+            if (!segReady) { segReady = true; updateFxModalUI(); }
+          });
+          selfieSeg = seg;
+          updateFxModalUI();
+          return seg;
+        } catch {
+          segBusy = false;
+          updateFxModalUI();
+          return null;
+        }
+      })();
+      return segInitPromise;
+    }
+
+    function initFxParticles(w, h) {
+      fxParticles.length = 0;
+      const colors = ["#f43f5e", "#3b82f6", "#22c55e", "#eab308", "#a855f7", "#06b6d4"];
+      for (let i = 0; i < 32; i++) {
+        fxParticles.push({
+          x: Math.random() * w, y: Math.random() * h,
+          vx: (Math.random() - 0.5) * 1.4, vy: 1 + Math.random() * 2.2,
+          size: 4 + Math.random() * 8, phase: Math.random() * Math.PI * 2,
+          color: colors[i % colors.length]
+        });
+      }
+    }
+
+    function drawCamEffectOverlay(ctx, w, h, effect, nowMs) {
+      if (!effect || effect === "none") return;
+      if (fxParticles.length === 0) initFxParticles(w, h);
+      ctx.save();
+      if (effect === "vignette") {
+        const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.25, w / 2, h / 2, Math.max(w, h) * 0.72);
+        g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.68)");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      } else if (effect === "cinema-bars") {
+        const barH = Math.round(h * 0.11);
+        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, barH); ctx.fillRect(0, h - barH, w, barH);
+      } else if (effect === "neon-frame") {
+        ctx.lineWidth = 10; ctx.shadowBlur = 22;
+        ctx.strokeStyle = "#22d3ee"; ctx.shadowColor = "#22d3ee"; ctx.strokeRect(10, 10, w - 20, h - 20);
+        ctx.lineWidth = 4; ctx.strokeStyle = "#ec4899"; ctx.shadowColor = "#ec4899"; ctx.strokeRect(20, 20, w - 40, h - 40);
+      } else if (effect === "sparkles") {
+        for (const p of fxParticles) {
+          const alpha = 0.25 + 0.75 * Math.abs(Math.sin(nowMs * 0.004 + p.phase));
+          ctx.fillStyle = `rgba(253, 224, 71, ${alpha.toFixed(2)})`;
+          ctx.beginPath(); ctx.arc(p.x % w, p.y % h, p.size * 0.35, 0, Math.PI * 2); ctx.fill();
+          ctx.fillRect((p.x % w) - p.size * 0.8, (p.y % h) - 1, p.size * 1.6, 2);
+          ctx.fillRect((p.x % w) - 1, (p.y % h) - p.size * 0.8, 2, p.size * 1.6);
+        }
+      } else if (effect === "snow") {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+        for (const p of fxParticles) {
+          p.y = (p.y + p.vy) % h; p.x = (p.x + Math.sin(nowMs * 0.002 + p.phase) * 0.8 + w) % w;
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.45, 0, Math.PI * 2); ctx.fill();
+        }
+      } else if (effect === "confetti") {
+        for (const p of fxParticles) {
+          p.y = (p.y + p.vy * 1.35) % h; p.x = (p.x + p.vx + w) % w;
+          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(nowMs * 0.005 + p.phase);
+          ctx.fillStyle = p.color; ctx.fillRect(-p.size * 0.5, -p.size * 0.25, p.size, p.size * 0.5);
+          ctx.restore();
+        }
+      } else if (effect === "hearts") {
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        for (const p of fxParticles) {
+          p.y = (p.y - p.vy * 0.85 + h) % h; p.x = (p.x + Math.sin(nowMs * 0.003 + p.phase) * 0.7 + w) % w;
+          ctx.font = `${Math.round(p.size * 2.2)}px system-ui, sans-serif`;
+          ctx.fillText("❤️", p.x, p.y);
+        }
+      }
+      ctx.restore();
+    }
+
+    function renderCamFxFrame() {
+      if (!fxCanvas || !fxCtx || !rawCamVideo || rawCamVideo.readyState < 2 || rawCamVideo.videoWidth === 0) return;
+      const vw = rawCamVideo.videoWidth, vh = rawCamVideo.videoHeight;
+      const scale = Math.min(1, 1280 / vw);
+      const w = Math.max(320, Math.round(vw * scale)), h = Math.max(180, Math.round(vh * scale));
+      if (fxCanvas.width !== w || fxCanvas.height !== h) { fxCanvas.width = w; fxCanvas.height = h; initFxParticles(w, h); }
+      if (!personCanvas) { personCanvas = document.createElement("canvas"); personCtx = personCanvas.getContext("2d"); }
+      if (personCanvas.width !== w || personCanvas.height !== h) { personCanvas.width = w; personCanvas.height = h; }
+
+      const styleFilter = getStyleCssFilter(camStyle);
+      if (needsSegmentation()) {
+        if (selfieSeg && !segBusy) {
+          segBusy = true;
+          Promise.resolve(selfieSeg.send({ image: rawCamVideo })).catch(() => { segBusy = false; });
+        }
+        fxCtx.save();
+        if (camBgMode === "blur-soft" || camBgMode === "blur-strong") {
+          const pad = camBgMode === "blur-strong" ? 1.07 : 1.04;
+          fxCtx.filter = camBgMode === "blur-strong" ? "blur(18px)" : "blur(7px)";
+          if (camMirror) { fxCtx.translate(w, 0); fxCtx.scale(-1, 1); }
+          fxCtx.drawImage(rawCamVideo, -(w * (pad - 1)) / 2, -(h * (pad - 1)) / 2, w * pad, h * pad);
+        } else if (camBgMode === "color") {
+          fxCtx.fillStyle = camBgColor || "#1e3a8a"; fxCtx.fillRect(0, 0, w, h);
+        } else if (camBgMode === "custom" && customBgImg && customBgImg.complete && customBgImg.naturalWidth > 0) {
+          drawCovered(fxCtx, customBgImg, 0, 0, w, h);
+        } else {
+          const preset = getPresetBgCanvas(["office", "neon", "sunset", "aurora"].includes(camBgMode) ? camBgMode : "office", w, h);
+          fxCtx.drawImage(preset, 0, 0, w, h);
+        }
+        fxCtx.restore();
+
+        if (segReady && segMaskCanvas) {
+          personCtx.save();
+          personCtx.clearRect(0, 0, w, h);
+          personCtx.globalCompositeOperation = "source-over";
+          personCtx.filter = "blur(2px)";
+          if (camMirror) { personCtx.translate(w, 0); personCtx.scale(-1, 1); }
+          personCtx.drawImage(segMaskCanvas, 0, 0, w, h);
+          personCtx.globalCompositeOperation = "source-in";
+          personCtx.filter = styleFilter;
+          personCtx.drawImage(rawCamVideo, 0, 0, w, h);
+          personCtx.restore();
+          fxCtx.drawImage(personCanvas, 0, 0, w, h);
+        } else {
+          fxCtx.save(); fxCtx.filter = styleFilter;
+          if (camMirror) { fxCtx.translate(w, 0); fxCtx.scale(-1, 1); }
+          fxCtx.drawImage(rawCamVideo, 0, 0, w, h);
+          fxCtx.restore();
+        }
+      } else {
+        fxCtx.save(); fxCtx.filter = styleFilter;
+        if (camMirror) { fxCtx.translate(w, 0); fxCtx.scale(-1, 1); }
+        fxCtx.drawImage(rawCamVideo, 0, 0, w, h);
+        fxCtx.restore();
+      }
+      drawCamEffectOverlay(fxCtx, w, h, camEffect, performance.now());
+    }
+
+    function startFxPipeline() {
+      if (!fxCanvas) { fxCanvas = document.createElement("canvas"); fxCanvas.width = 1280; fxCanvas.height = 720; fxCtx = fxCanvas.getContext("2d"); }
+      if (needsSegmentation()) ensureSelfieSegmentation();
+      renderCamFxFrame();
+      if (!fxStream) fxStream = fxCanvas.captureStream(30);
+      if (!fxWorker && !fxLoopTimer) {
+        try {
+          const code = `let t=null; self.onmessage=(e)=>{ if(e.data==="start"){clearInterval(t);t=setInterval(()=>self.postMessage(0),33);} else if(e.data==="stop"){clearInterval(t);t=null;} };`;
+          fxWorkerUrl = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
+          fxWorker = new Worker(fxWorkerUrl); fxWorker.onmessage = renderCamFxFrame; fxWorker.postMessage("start");
+        } catch { fxLoopTimer = setInterval(renderCamFxFrame, 33); }
+      }
+      return fxStream;
+    }
+
+    function stopFxPipeline() {
+      if (fxWorker) { fxWorker.postMessage("stop"); fxWorker.terminate(); fxWorker = null; }
+      if (fxWorkerUrl) { URL.revokeObjectURL(fxWorkerUrl); fxWorkerUrl = null; }
+      if (fxLoopTimer) { clearInterval(fxLoopTimer); fxLoopTimer = null; }
+      if (fxStream) { fxStream.getTracks().forEach(t => t.stop()); fxStream = null; }
+    }
+
+    function stopRawCamStream() {
+      if (rawCamVideo) { try { rawCamVideo.pause(); rawCamVideo.srcObject = null; } catch {} rawCamVideo = null; }
+      if (rawCamStream) { rawCamStream.getTracks().forEach(t => t.stop()); rawCamStream = null; }
+    }
+
+    function getDesiredLocalVideoTrack() {
+      const rawTrack = rawCamStream?.getVideoTracks?.()[0];
+      if (!rawTrack) return null;
+      if (needsFxPipeline()) {
+        const s = startFxPipeline();
+        const t = s.getVideoTracks()[0];
+        if (t) t.contentHint = "motion";
+        return t;
+      }
+      stopFxPipeline();
+      const cloned = rawTrack.clone();
+      cloned.contentHint = "motion";
+      return cloned;
+    }
+
+    async function syncLiveCameraOutput() {
+      updateFxModalUI();
+      if (!camEnabled || !rawCamStream) return;
+      const nextTrack = getDesiredLocalVideoTrack();
+      if (!nextTrack) return;
+      const previewStream = new MediaStream([nextTrack]);
+      const lv = ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video");
+      if (lkRoom && lkRoom.state === "connected") {
+        const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera);
+        if (pub?.track) {
+          try { await pub.track.replaceTrack(nextTrack); pub.track.attach(lv); }
+          catch {
+            try { await lkRoom.localParticipant.unpublishTrack(pub.track, false); } catch {}
+            await lkRoom.localParticipant.publishTrack(nextTrack, { source: LivekitClient.Track.Source.Camera, ...CAM_PUBLISH_DEFAULTS });
+          }
+        } else {
+          await lkRoom.localParticipant.publishTrack(nextTrack, { source: LivekitClient.Track.Source.Camera, ...CAM_PUBLISH_DEFAULTS });
+        }
+      } else if (lv) {
+        if (lv.srcObject && lv.srcObject !== fxStream) lv.srcObject.getTracks().forEach(t => t.stop());
+        lv.srcObject = previewStream;
+      }
+      if (!camFxModal.classList.contains("hidden")) { fxPreviewVideo.srcObject = previewStream; fxPreviewVideo.play().catch(() => {}); }
+    }
+
+    function updateFxModalUI() {
+      document.querySelectorAll("#fx-bg-grid .fx-chip").forEach(b => b.classList.toggle("active-fx", b.dataset.bg === camBgMode));
+      document.querySelectorAll("#fx-style-grid .fx-chip").forEach(b => b.classList.toggle("active-fx", b.dataset.style === camStyle));
+      document.querySelectorAll("#fx-effect-grid .fx-chip").forEach(b => b.classList.toggle("active-fx", b.dataset.effect === camEffect));
+      fxBgColorInput.value = camBgColor;
+      fxMirrorChk.checked = camMirror;
+      camFxBtn.classList.toggle("active", needsFxPipeline());
+      modalFxBtn.classList.toggle("active", needsFxPipeline());
+      fxPreviewOff.classList.toggle("hidden", camEnabled && Boolean(rawCamStream));
+      if (needsSegmentation() && typeof SelfieSegmentation === "undefined") { fxStatusPill.textContent = "⚠️ AI BG offline"; fxStatusPill.classList.remove("hidden"); }
+      else if (needsSegmentation() && !segReady) { fxStatusPill.textContent = "⏳ Loading AI BG..."; fxStatusPill.classList.remove("hidden"); }
+      else if (needsFxPipeline()) { fxStatusPill.textContent = "✅ FX Active"; fxStatusPill.classList.remove("hidden"); }
+      else fxStatusPill.classList.add("hidden");
+    }
+
+    camFxBtn.onclick = () => { controlsDock.classList.remove("more-open"); camFxModal.classList.remove("hidden"); updateFxModalUI(); if (camEnabled) syncLiveCameraOutput(); };
+    modalFxBtn.onclick = () => { camFxModal.classList.remove("hidden"); updateFxModalUI(); if (camEnabled) syncLiveCameraOutput(); };
+    fxCloseBtn.onclick = () => { camFxModal.classList.add("hidden"); if (!camEnabled) fxPreviewVideo.srcObject = null; };
+    camFxModal.onclick = (e) => { if (e.target === camFxModal) fxCloseBtn.click(); };
+    fxToggleCamBtn.onclick = async () => { await enableCamera(); };
+    document.querySelectorAll("#fx-bg-grid .fx-chip[data-bg]").forEach(btn => {
+      btn.onclick = () => {
+        const bg = btn.dataset.bg;
+        if (bg === "custom") { fxBgFileInput.click(); return; }
+        camBgMode = bg; saveCamFxPrefs(); syncLiveCameraOutput();
+      };
+    });
+    fxBgColorInput.oninput = () => { camBgColor = fxBgColorInput.value; camBgMode = "color"; saveCamFxPrefs(); syncLiveCameraOutput(); };
+    fxBgFileInput.onchange = (e) => {
+      const f = e.target.files?.[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas"), scale = Math.min(1, 1280 / img.width);
+          c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          camBgCustomUrl = c.toDataURL("image/jpeg", 0.85);
+          try { localStorage.setItem("vc_cam_bg_custom", camBgCustomUrl); } catch {}
+          customBgImg = img; camBgMode = "custom"; saveCamFxPrefs(); syncLiveCameraOutput();
+        };
+        img.src = ev.target.result;
+      };
+      r.readAsDataURL(f); fxBgFileInput.value = "";
+    };
+    document.querySelectorAll("#fx-style-grid .fx-chip[data-style]").forEach(btn => {
+      btn.onclick = () => { camStyle = btn.dataset.style; saveCamFxPrefs(); syncLiveCameraOutput(); };
+    });
+    document.querySelectorAll("#fx-effect-grid .fx-chip[data-effect]").forEach(btn => {
+      btn.onclick = () => { camEffect = btn.dataset.effect; saveCamFxPrefs(); syncLiveCameraOutput(); };
+    });
+    fxMirrorChk.onchange = () => { camMirror = fxMirrorChk.checked; saveCamFxPrefs(); syncLiveCameraOutput(); };
+    fxResetBtn.onclick = () => { camBgMode = "none"; camStyle = "none"; camEffect = "none"; camMirror = false; saveCamFxPrefs(); syncLiveCameraOutput(); };
+
     async function enableCamera() {
       if (!(await checkDeviceExists("videoinput"))) { showNoticeBanner("❌ No camera found on this device.", "denied", 5000); return false; }
-      if (!lkRoom) {
-        try { const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, min: 24 } } }); ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video").srcObject = s; setTilePlaceholder("local", true, "Camera Disabled"); wantCamOnJoin = true; camEnabled = true; updateControlButtons(); return true; }
-        catch (err) { handleMediaError(err, "camera"); return false; }
-      }
       try {
-        await lkRoom.localParticipant.setCameraEnabled(
-          true,
-          { resolution: LivekitClient.VideoPresets.h1080.resolution, frameRate: 30, facingMode: "user" },
-          CAM_PUBLISH_DEFAULTS
-        ); camEnabled = true;
-        const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera), lv = ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar).querySelector("video");
-        if (pub?.track) {
-          if (pub.track.mediaStreamTrack) pub.track.mediaStreamTrack.contentHint = "motion";
-          pub.track.attach(lv);
+        if (!rawCamStream || !rawCamStream.active) {
+          rawCamStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, min: 24 }, facingMode: "user" } });
+          rawCamVideo = document.createElement("video");
+          rawCamVideo.muted = true; rawCamVideo.autoplay = true; rawCamVideo.playsInline = true;
+          rawCamVideo.srcObject = rawCamStream;
+          await rawCamVideo.play().catch(() => {});
         }
-        setTilePlaceholder("local", true, "Camera Disabled"); updateControlButtons(); return true;
-      } catch (err) { handleMediaError(err, "camera"); camEnabled = false; updateControlButtons(); return false; }
+        wantCamOnJoin = true; camEnabled = true;
+        setTilePlaceholder("local", true, "Camera Disabled");
+        await syncLiveCameraOutput();
+        updateControlButtons();
+        return true;
+      } catch (err) {
+        handleMediaError(err, "camera");
+        camEnabled = false; wantCamOnJoin = false;
+        stopFxPipeline(); stopRawCamStream(); updateFxModalUI(); updateControlButtons();
+        return false;
+      }
     }
     async function disableCamera() {
       wantCamOnJoin = false; camEnabled = false;
       const lv = document.getElementById("tile-local")?.querySelector("video");
-      if (lkRoom) { const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera); if (pub?.track && lv) pub.track.detach(lv); await lkRoom.localParticipant.setCameraEnabled(false); }
-      else if (lv?.srcObject) { lv.srcObject.getTracks().forEach(t => t.stop()); lv.srcObject = null; }
-      setTilePlaceholder("local", false, "Camera Disabled"); updateControlButtons();
+      if (lkRoom) {
+        const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera);
+        if (pub?.track) {
+          if (lv) pub.track.detach(lv);
+          try { await lkRoom.localParticipant.unpublishTrack(pub.track, true); } catch {}
+        }
+      } else if (lv?.srcObject) {
+        if (lv.srcObject !== fxStream) lv.srcObject.getTracks().forEach(t => t.stop());
+        lv.srcObject = null;
+      }
+      fxPreviewVideo.srcObject = null;
+      stopFxPipeline(); stopRawCamStream();
+      setTilePlaceholder("local", false, "Camera Disabled"); updateFxModalUI(); updateControlButtons();
     }
 
     function showRemoteScreenStage(presenterName, track, publication) {
@@ -2531,7 +2981,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       catch (err) { showNoticeBanner(`❌ LiveKit error (${url}): ${err?.message || err}`, "denied", 0); return; }
 
       const lv = document.getElementById("tile-local")?.querySelector("video");
-      if (lv?.srcObject) { lv.srcObject.getTracks().forEach(t => t.stop()); lv.srcObject = null; }
+      if (lv?.srcObject) {
+        if (lv.srcObject !== fxStream) lv.srcObject.getTracks().forEach(t => t.stop());
+        lv.srcObject = null;
+      }
       if (wantMicOnJoin) await enableMicrophone();
       if (wantCamOnJoin) await enableCamera();
 
@@ -2587,7 +3040,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       else if (requireScreenApproval && !strictHost && !screenShareApproved) { screenBtn.disabled = false; screenBtn.textContent = "Request Screen Share"; screenBtn.classList.add("warning"); }
       else if (screenShareApproved) { screenBtn.disabled = false; screenBtn.textContent = "Approved — Share Screen"; screenBtn.classList.add("active"); }
       else { screenBtn.disabled = false; screenBtn.textContent = "Share Screen"; }
-      updateWhiteboardUI(); scheduleParticipantsRender();
+      updateWhiteboardUI(); updateFxModalUI(); scheduleParticipantsRender();
     }
 
     hostRecordBtn.onclick = async () => { if (!isHost || currentHostId !== clientId) return; controlsDock.classList.remove("more-open"); if (isRecordingLocally) await stopHostRecording(true); else await startHostRecording(); };
@@ -2629,7 +3082,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       currentRoomId = roomId; currentMeetingTitle = title || `Room ${roomId}`;
       isLeavingCall = false; wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; speakerMuted = false; hasJoinedRoom = false; rejoinToken = "";
       waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null; appliedTrackQuality.clear();
-      clearPendingAttachments(); emojiPicker.classList.add("hidden");
+      clearPendingAttachments(); emojiPicker.classList.add("hidden"); camFxModal.classList.add("hidden"); fxPreviewVideo.srcObject = null;
       syncMeetingCountdown(null, null);
       pinnedTileId = null; lastActiveSpeakerTileId = null; lastSpeakingKey = ""; lkSpeakingIds.clear(); seenMsgIds.clear();
       wbOpen = false; wbLocked = false; wbHistory = []; redrawWhiteboard();
@@ -2744,6 +3197,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); wsPingTimer = null;
       clearInterval(realtimeSyncTimer); realtimeSyncTimer = null; appliedTrackQuality.clear();
       clearPendingAttachments(); emojiPicker.classList.add("hidden"); imgLightboxClose.click();
+      camFxModal.classList.add("hidden"); fxPreviewVideo.srcObject = null;
       syncMeetingCountdown(null, null);
       await exitFloatingPip(); stopPipStream(); stopBackgroundKeepalive(); await releaseWakeLock();
       clearTimeout(participantsRenderTimer); participantsRenderTimer = null; clearTimeout(dmRefreshTimer); dmRefreshTimer = null;
@@ -2753,6 +3207,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (document.fullscreenElement === whiteboardStage || document.webkitFullscreenElement === whiteboardStage) { try { if (document.exitFullscreen) await document.exitFullscreen(); else if (document.webkitExitFullscreen) await document.webkitExitFullscreen(); } catch {} }
       if (ws) try { ws.close(); } catch {} ws = null;
       if (lkRoom) { try { await lkRoom.disconnect(); } catch {} lkRoom = null; }
+      stopFxPipeline(); stopRawCamStream();
       const lv = document.getElementById("tile-local")?.querySelector("video");
       if (lv?.srcObject) { lv.srcObject.getTracks().forEach(t => t.stop()); lv.srcObject = null; }
       peerNames = {}; peerAvatars = {}; waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null; rejoinToken = "";
@@ -2771,7 +3226,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
     function handlePageExit() {
       isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); clearInterval(realtimeSyncTimer);
-      releaseWakeLock(); stopBackgroundKeepalive(); stopPipStream();
+      releaseWakeLock(); stopBackgroundKeepalive(); stopPipStream(); stopFxPipeline(); stopRawCamStream();
       if (ws) try { ws.close(); } catch {}
       if (lkRoom) try { lkRoom.disconnect(); } catch {}
     }
