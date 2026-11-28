@@ -122,6 +122,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .avatar-circle { width: 52px; height: 52px; border-radius: 50%; background: #2563eb; color: #fff; font-weight: 700; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; border: 2px solid #3b82f6; transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.15s ease; }
     .avatar-circle img { width: 100%; height: 100%; object-fit: cover; }
     .avatar-circle.large { width: 82px; height: 82px; font-size: 1.7rem; }
+    .video-tile .avatar-circle.large { width: clamp(80px, 40%, 190px); height: auto; aspect-ratio: 1 / 1; font-size: clamp(1.2rem, 3vw, 2.7rem); border-width: 3px; }
     .avatar-circle.small { width: 34px; height: 34px; font-size: 0.85rem; border-width: 1.5px; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
     .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.85rem; }
@@ -357,6 +358,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       #video-grid.mode-sidebar .video-tile.featured-tile { grid-column: 1; grid-row: 1 / span 24; position: sticky; top: 0; max-height: 44dvh; }
       .pin-btn, .snap-btn { opacity: 0.85; padding: 2px 6px; font-size: 0.7rem; }
       .avatar-circle.large { width: 54px; height: 54px; font-size: 1.15rem; }
+      .video-tile .avatar-circle.large:has(img) { width: clamp(54px, 42%, 115px); height: auto; aspect-ratio: 1 / 1; }
       .placeholder { font-size: 0.75rem; gap: 0.3rem; }
       .label { font-size: 0.72rem; padding: 2px 6px; bottom: 5px; left: 5px; }
       #screen-stage { max-height: 40dvh; padding: 0.45rem 0.6rem; }
@@ -824,10 +826,16 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       reader.onload = (ev) => {
         const img = new Image();
         img.onload = () => {
-          const canvas = document.createElement("canvas"); canvas.width = 96; canvas.height = 96;
+          const canvas = document.createElement("canvas"); canvas.width = 384; canvas.height = 384;
+          const ctx = canvas.getContext("2d");
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
           const size = Math.min(img.width, img.height);
-          canvas.getContext("2d").drawImage(img, (img.width - size) / 2, (img.height - size) / 2, size, size, 0, 0, 96, 96);
-          localAvatar = canvas.toDataURL("image/jpeg", 0.68);
+          ctx.drawImage(img, (img.width - size) / 2, (img.height - size) / 2, size, size, 0, 0, 384, 384);
+          let dataUrl = canvas.toDataURL("image/webp", 0.90);
+          if (!dataUrl.startsWith("data:image/webp") || dataUrl.length > 180000) dataUrl = canvas.toDataURL("image/jpeg", 0.90);
+          if (dataUrl.length > 180000) dataUrl = canvas.toDataURL("image/jpeg", 0.78);
+          localAvatar = dataUrl;
           try { localStorage.setItem("vc_avatar", localAvatar); } catch {}
           renderAvatarPreviews();
         };
@@ -3393,7 +3401,7 @@ def upsert_meeting_policy(room_id: str, meta: dict):
 def sanitize_avatar(avatar: str | None) -> str:
     if not isinstance(avatar, str):
         return ""
-    if avatar.startswith("data:image/") and len(avatar) <= 30_000:
+    if avatar.startswith("data:image/") and len(avatar) <= 220_000:
         return avatar
     return ""
 
