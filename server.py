@@ -144,7 +144,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .meeting-title { font-weight: 600; font-size: 1rem; word-break: break-word; }
     .meeting-sub { font-size: 0.82rem; color: var(--text-muted); word-break: break-word; }
     .link-box { background: var(--bg-input); border: 1px dashed #3b82f6; padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 0.85rem; word-break: break-all; color: var(--link-color); }
-    #player-modal, #img-lightbox, #cam-fx-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.82); z-index: 65; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    #player-modal, #img-lightbox, #cam-fx-modal, #leave-confirm-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.82); z-index: 65; display: flex; align-items: center; justify-content: center; padding: 1rem; }
     .player-box { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 12px; padding: 1rem; width: min(95vw, 960px); display: flex; flex-direction: column; gap: 0.75rem; }
     .fx-box { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 14px; padding: 1rem; width: min(96vw, 560px); max-height: 90dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.85rem; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5); }
     .fx-preview-wrap { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #090b0f; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; }
@@ -418,9 +418,20 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <div id="player-modal" class="hidden"><div class="player-box"><div class="player-header"><strong id="player-title">Recording</strong><button id="player-close-btn" class="danger" style="padding: 0.35rem 0.75rem;">✕ Close</button></div><video id="player-video" controls autoplay playsinline></video></div></div>
   <div id="img-lightbox" class="hidden"><div class="player-box"><div class="player-header"><strong id="img-lightbox-title">Image Preview</strong><div class="row"><a id="img-lightbox-download" class="btn-link" href="#" download>⬇️ Download</a><button id="img-lightbox-close" class="danger" type="button" style="padding: 0.35rem 0.75rem;">✕ Close</button></div></div><img id="img-lightbox-img" alt="Preview" /></div></div>
 
+  <div id="leave-confirm-modal" class="hidden">
+    <div class="join-modal" style="max-width:380px;">
+      <h2>Leave Meeting?</h2>
+      <p id="leave-confirm-msg">Are you sure you want to leave this meeting?</p>
+      <div class="row" style="width:100%; justify-content:center;">
+        <button id="leave-confirm-no" class="secondary" type="button" style="flex:1;">Stay</button>
+        <button id="leave-confirm-yes" class="danger" type="button" style="flex:1;">Yes, Leave</button>
+      </div>
+    </div>
+  </div>
+
   <div id="cam-fx-modal" class="hidden">
     <div class="fx-box">
-      <div class="player-header"><strong>🎭 Camera Background, Styles & Effects (No Green Screen)</strong><button id="fx-close-btn" class="danger" type="button" style="padding: 0.32rem 0.7rem;">✕ Close</button></div>
+      <div class="player-header"><strong>🎭 Camera Background, Styles &amp; Effects (No Green Screen)</strong><button id="fx-close-btn" class="danger" type="button" style="padding: 0.32rem 0.7rem;">✕ Close</button></div>
       <div class="fx-preview-wrap">
         <video id="fx-preview-video" autoplay playsinline muted></video>
         <div id="fx-preview-off" class="fx-preview-off"><span>📷 Camera is currently off</span><button id="fx-toggle-cam-btn" class="active" type="button">Enable Camera to Preview</button></div>
@@ -443,7 +454,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         </div>
       </div>
       <div>
-        <div class="fx-section-title">2. Camera Style & Color</div>
+        <div class="fx-section-title">2. Camera Style &amp; Color</div>
         <div class="fx-grid" id="fx-style-grid">
           <button type="button" class="fx-chip" data-style="none">✨ Normal</button>
           <button type="button" class="fx-chip" data-style="beauty">🌸 Soft Beauty</button>
@@ -456,7 +467,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         </div>
       </div>
       <div>
-        <div class="fx-section-title">3. Live Effects & Frames</div>
+        <div class="fx-section-title">3. Live Effects &amp; Frames</div>
         <div class="fx-grid" id="fx-effect-grid">
           <button type="button" class="fx-chip" data-effect="none">🚫 None</button>
           <button type="button" class="fx-chip" data-effect="sparkles">✨ Sparkles</button>
@@ -495,9 +506,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         <button id="mobile-more-btn" class="secondary mobile-only" type="button">⋯ More</button>
       </div>
       <div class="secondary-controls">
-        <button id="cam-fx-btn" class="secondary" type="button" title="Change background (no green screen), styles & camera effects">🎭 Cam FX</button>
+        <button id="cam-fx-btn" class="secondary" type="button" title="Change background (no green screen), styles &amp; camera effects">🎭 Cam FX</button>
         <select id="view-mode-select" title="Switch Meeting View"><option value="grid">📐 Grid View</option><option value="speaker">🎤 Speaker View</option><option value="sidebar">◫ Sidebar View</option><option value="compact">🪪 Compact View</option></select>
-        <select id="quality-mode-select" title="Video Quality & Smoothness"><option value="auto">🎥 Auto HD (Smooth)</option><option value="hd">🌟 Full HD (1080p Real-Time)</option><option value="saver">📶 Data Saver (360p)</option></select>
+        <select id="quality-mode-select" title="Video Quality &amp; Smoothness"><option value="auto">🎥 Auto HD (Smooth)</option><option value="hd">🌟 Full HD (1080p Real-Time)</option><option value="saver">📶 Data Saver (360p)</option></select>
         <select id="call-theme-select" title="Appearance Mode"><option value="dark">🌙 Night</option><option value="system">🌓 System</option><option value="light">☀️ Light</option></select>
         <button id="wake-lock-btn" class="secondary" type="button" title="Keep phone screen awake even when camera is off">🔆 Awake: On</button>
         <button id="pip-btn" class="secondary" type="button" title="Open floating mini window (Picture-in-Picture)">🪟 Float Screen</button>
@@ -514,7 +525,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     <div id="call-body">
       <div id="stage">
         <div id="view-swipe-toast" class="hidden"></div>
-        <div id="join-options-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="modal-avatar-preview" class="avatar-circle large">U</div><h2 id="join-modal-title">Choose Audio & Camera</h2><p>Select how you want to join this meeting. You can switch anytime on screen.</p><div class="join-choice-grid"><button id="modal-mic-btn" class="active join-choice-btn">🎤 Join with Microphone</button><button id="modal-speaker-btn" class="join-choice-btn">🔊 Join with Only Computer Speaker</button></div><hr style="border: 0; border-top: 1px solid var(--border); width: 100%; margin: 0.2rem 0;" /><div class="row" style="justify-content: center; width: 100%;"><button id="modal-cam-btn" class="secondary" style="flex: 1;">📷 Enable Camera</button><button id="modal-fx-btn" class="secondary" type="button">🎭 BG &amp; Effects</button></div></div></div>
+        <div id="join-options-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="modal-avatar-preview" class="avatar-circle large">U</div><h2 id="join-modal-title">Choose Audio &amp; Camera</h2><p>Select how you want to join this meeting. You can switch anytime on screen.</p><div class="join-choice-grid"><button id="modal-mic-btn" class="active join-choice-btn">🎤 Join with Microphone</button><button id="modal-speaker-btn" class="join-choice-btn">🔊 Join with Only Computer Speaker</button></div><hr style="border: 0; border-top: 1px solid var(--border); width: 100%; margin: 0.2rem 0;" /><div class="row" style="justify-content: center; width: 100%;"><button id="modal-cam-btn" class="secondary" style="flex: 1;">📷 Enable Camera</button><button id="modal-fx-btn" class="secondary" type="button">🎭 BG &amp; Effects</button></div></div></div>
         <div id="waiting-room-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="waiting-avatar-preview" class="avatar-circle large">U</div><div class="spinner"></div><h2>Waiting Room</h2><p id="waiting-room-status">Waiting for the meeting owner to let you in...</p><button id="cancel-waiting-btn" class="danger" style="width: 100%;">Leave Waiting Room</button></div></div>
         <div id="reaction-layer"></div>
         <div id="audio-container" class="hidden"></div>
@@ -605,6 +616,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     const imgLightboxImg = document.getElementById("img-lightbox-img");
     const imgLightboxDownload = document.getElementById("img-lightbox-download");
     const imgLightboxClose = document.getElementById("img-lightbox-close");
+    const leaveConfirmModal = document.getElementById("leave-confirm-modal");
+    const leaveConfirmMsg = document.getElementById("leave-confirm-msg");
+    const leaveConfirmNo = document.getElementById("leave-confirm-no");
+    const leaveConfirmYes = document.getElementById("leave-confirm-yes");
     const camFxModal = document.getElementById("cam-fx-modal");
     const fxPreviewVideo = document.getElementById("fx-preview-video");
     const fxPreviewOff = document.getElementById("fx-preview-off");
@@ -749,8 +764,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     let camEffect = localStorage.getItem("vc_cam_effect") || "none";
     let camMirror = localStorage.getItem("vc_cam_mirror") === "1";
     let rawCamStream = null, rawCamVideo = null, fxCanvas = null, fxCtx = null, personCanvas = null, personCtx = null;
-    let segMaskCanvas = null, segMaskCtx = null, fxStream = null, fxWorker = null, fxWorkerUrl = null, fxLoopTimer = null;
-    let selfieSeg = null, segReady = false, segBusy = false, segInitPromise = null, customBgImg = null;
+    let segMaskCanvas = null, segMaskCtx = null, segInputCanvas = null, segInputCtx = null;
+    let blurBgCanvas = null, blurBgCtx = null, fxStream = null, fxWorker = null, fxWorkerUrl = null, fxLoopTimer = null, fxRafId = null;
+    let selfieSeg = null, segReady = false, segBusy = false, segInitPromise = null, lastSegSentAt = 0, lastFxFrameAt = 0, customBgImg = null;
     const presetBgCache = {}, fxParticles = [];
 
     let wbOpen = false, wbLocked = false, wbTool = "pen", wbColor = "#111827", wbHistory = [];
@@ -2556,11 +2572,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     function initFxParticles(w, h) {
       fxParticles.length = 0;
       const colors = ["#f43f5e", "#3b82f6", "#22c55e", "#eab308", "#a855f7", "#06b6d4"];
-      for (let i = 0; i < 32; i++) {
+      for (let i = 0; i < 28; i++) {
         fxParticles.push({
           x: Math.random() * w, y: Math.random() * h,
           vx: (Math.random() - 0.5) * 1.4, vy: 1 + Math.random() * 2.2,
-          size: 4 + Math.random() * 8, phase: Math.random() * Math.PI * 2,
+          size: 4 + Math.random() * 7, phase: Math.random() * Math.PI * 2,
           color: colors[i % colors.length]
         });
       }
@@ -2571,16 +2587,23 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (fxParticles.length === 0) initFxParticles(w, h);
       ctx.save();
       if (effect === "vignette") {
-        const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.25, w / 2, h / 2, Math.max(w, h) * 0.72);
-        g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.68)");
+        const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.22, w / 2, h / 2, Math.max(w, h) * 0.58);
+        g.addColorStop(0, "rgba(0,0,0,0)");
+        g.addColorStop(0.55, "rgba(0,0,0,0.28)");
+        g.addColorStop(1, "rgba(0,0,0,0.88)");
         ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
       } else if (effect === "cinema-bars") {
-        const barH = Math.round(h * 0.11);
-        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, barH); ctx.fillRect(0, h - barH, w, barH);
+        const barH = Math.round(h * 0.13);
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, w, barH);
+        ctx.fillRect(0, h - barH, w, barH);
+        ctx.fillStyle = "rgba(255,255,255,0.14)";
+        ctx.fillRect(0, barH, w, 1);
+        ctx.fillRect(0, h - barH - 1, w, 1);
       } else if (effect === "neon-frame") {
-        ctx.lineWidth = 10; ctx.shadowBlur = 22;
-        ctx.strokeStyle = "#22d3ee"; ctx.shadowColor = "#22d3ee"; ctx.strokeRect(10, 10, w - 20, h - 20);
-        ctx.lineWidth = 4; ctx.strokeStyle = "#ec4899"; ctx.shadowColor = "#ec4899"; ctx.strokeRect(20, 20, w - 40, h - 40);
+        ctx.lineWidth = 8; ctx.shadowBlur = 16;
+        ctx.strokeStyle = "#22d3ee"; ctx.shadowColor = "#22d3ee"; ctx.strokeRect(8, 8, w - 16, h - 16);
+        ctx.lineWidth = 3; ctx.strokeStyle = "#ec4899"; ctx.shadowColor = "#ec4899"; ctx.strokeRect(16, 16, w - 32, h - 32);
       } else if (effect === "sparkles") {
         for (const p of fxParticles) {
           const alpha = 0.25 + 0.75 * Math.abs(Math.sin(nowMs * 0.004 + p.phase));
@@ -2590,10 +2613,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
           ctx.fillRect((p.x % w) - 1, (p.y % h) - p.size * 0.8, 2, p.size * 1.6);
         }
       } else if (effect === "snow") {
-        ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
         for (const p of fxParticles) {
           p.y = (p.y + p.vy) % h; p.x = (p.x + Math.sin(nowMs * 0.002 + p.phase) * 0.8 + w) % w;
-          ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.45, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.42, 0, Math.PI * 2); ctx.fill();
         }
       } else if (effect === "confetti") {
         for (const p of fxParticles) {
@@ -2606,34 +2629,51 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
         for (const p of fxParticles) {
           p.y = (p.y - p.vy * 0.85 + h) % h; p.x = (p.x + Math.sin(nowMs * 0.003 + p.phase) * 0.7 + w) % w;
-          ctx.font = `${Math.round(p.size * 2.2)}px system-ui, sans-serif`;
+          ctx.font = `${Math.round(p.size * 2)}px system-ui, sans-serif`;
           ctx.fillText("❤️", p.x, p.y);
         }
       }
       ctx.restore();
     }
 
+    function drawFastBlurredBg(targetCtx, w, h, strong) {
+      const bw = strong ? 40 : 88, bh = strong ? 22 : 50;
+      if (!blurBgCanvas) { blurBgCanvas = document.createElement("canvas"); blurBgCtx = blurBgCanvas.getContext("2d"); }
+      if (blurBgCanvas.width !== bw || blurBgCanvas.height !== bh) { blurBgCanvas.width = bw; blurBgCanvas.height = bh; }
+      blurBgCtx.save();
+      blurBgCtx.imageSmoothingEnabled = true;
+      blurBgCtx.clearRect(0, 0, bw, bh);
+      if (camMirror) { blurBgCtx.translate(bw, 0); blurBgCtx.scale(-1, 1); }
+      drawCovered(blurBgCtx, rawCamVideo, 0, 0, bw, bh);
+      blurBgCtx.restore();
+      targetCtx.save();
+      targetCtx.imageSmoothingEnabled = true;
+      targetCtx.imageSmoothingQuality = "high";
+      targetCtx.drawImage(blurBgCanvas, 0, 0, w, h);
+      targetCtx.restore();
+    }
+
     function renderCamFxFrame() {
       if (!fxCanvas || !fxCtx || !rawCamVideo || rawCamVideo.readyState < 2 || rawCamVideo.videoWidth === 0) return;
-      const vw = rawCamVideo.videoWidth, vh = rawCamVideo.videoHeight;
-      const scale = Math.min(1, 1280 / vw);
-      const w = Math.max(320, Math.round(vw * scale)), h = Math.max(180, Math.round(vh * scale));
+      const w = 854, h = 480;
       if (fxCanvas.width !== w || fxCanvas.height !== h) { fxCanvas.width = w; fxCanvas.height = h; initFxParticles(w, h); }
       if (!personCanvas) { personCanvas = document.createElement("canvas"); personCtx = personCanvas.getContext("2d"); }
       if (personCanvas.width !== w || personCanvas.height !== h) { personCanvas.width = w; personCanvas.height = h; }
 
+      const nowMs = performance.now();
       const styleFilter = getStyleCssFilter(camStyle);
+
       if (needsSegmentation()) {
-        if (selfieSeg && !segBusy) {
+        if (selfieSeg && !segBusy && (nowMs - lastSegSentAt >= 42)) {
+          lastSegSentAt = nowMs;
           segBusy = true;
-          Promise.resolve(selfieSeg.send({ image: rawCamVideo })).catch(() => { segBusy = false; });
+          if (!segInputCanvas) { segInputCanvas = document.createElement("canvas"); segInputCanvas.width = 256; segInputCanvas.height = 144; segInputCtx = segInputCanvas.getContext("2d"); }
+          drawCovered(segInputCtx, rawCamVideo, 0, 0, 256, 144);
+          Promise.resolve(selfieSeg.send({ image: segInputCanvas })).catch(() => { segBusy = false; });
         }
-        fxCtx.save();
+
         if (camBgMode === "blur-soft" || camBgMode === "blur-strong") {
-          const pad = camBgMode === "blur-strong" ? 1.07 : 1.04;
-          fxCtx.filter = camBgMode === "blur-strong" ? "blur(18px)" : "blur(7px)";
-          if (camMirror) { fxCtx.translate(w, 0); fxCtx.scale(-1, 1); }
-          fxCtx.drawImage(rawCamVideo, -(w * (pad - 1)) / 2, -(h * (pad - 1)) / 2, w * pad, h * pad);
+          drawFastBlurredBg(fxCtx, w, h, camBgMode === "blur-strong");
         } else if (camBgMode === "color") {
           fxCtx.fillStyle = camBgColor || "#1e3a8a"; fxCtx.fillRect(0, 0, w, h);
         } else if (camBgMode === "custom" && customBgImg && customBgImg.complete && customBgImg.naturalWidth > 0) {
@@ -2642,55 +2682,69 @@ HTML_CONTENT = r"""<!DOCTYPE html>
           const preset = getPresetBgCanvas(["office", "neon", "sunset", "aurora"].includes(camBgMode) ? camBgMode : "office", w, h);
           fxCtx.drawImage(preset, 0, 0, w, h);
         }
-        fxCtx.restore();
 
         if (segReady && segMaskCanvas) {
           personCtx.save();
           personCtx.clearRect(0, 0, w, h);
           personCtx.globalCompositeOperation = "source-over";
-          personCtx.filter = "blur(2px)";
+          personCtx.imageSmoothingEnabled = true;
+          personCtx.imageSmoothingQuality = "high";
           if (camMirror) { personCtx.translate(w, 0); personCtx.scale(-1, 1); }
           personCtx.drawImage(segMaskCanvas, 0, 0, w, h);
           personCtx.globalCompositeOperation = "source-in";
-          personCtx.filter = styleFilter;
-          personCtx.drawImage(rawCamVideo, 0, 0, w, h);
+          if (styleFilter !== "none") personCtx.filter = styleFilter;
+          drawCovered(personCtx, rawCamVideo, 0, 0, w, h);
           personCtx.restore();
           fxCtx.drawImage(personCanvas, 0, 0, w, h);
         } else {
-          fxCtx.save(); fxCtx.filter = styleFilter;
+          fxCtx.save();
+          if (styleFilter !== "none") fxCtx.filter = styleFilter;
           if (camMirror) { fxCtx.translate(w, 0); fxCtx.scale(-1, 1); }
-          fxCtx.drawImage(rawCamVideo, 0, 0, w, h);
+          drawCovered(fxCtx, rawCamVideo, 0, 0, w, h);
           fxCtx.restore();
         }
       } else {
-        fxCtx.save(); fxCtx.filter = styleFilter;
+        fxCtx.save();
+        if (styleFilter !== "none") fxCtx.filter = styleFilter;
         if (camMirror) { fxCtx.translate(w, 0); fxCtx.scale(-1, 1); }
-        fxCtx.drawImage(rawCamVideo, 0, 0, w, h);
+        drawCovered(fxCtx, rawCamVideo, 0, 0, w, h);
         fxCtx.restore();
       }
-      drawCamEffectOverlay(fxCtx, w, h, camEffect, performance.now());
+      drawCamEffectOverlay(fxCtx, w, h, camEffect, nowMs);
+    }
+
+    function runFxRafLoop(ts) {
+      if (!fxStream) { fxRafId = null; return; }
+      if (!document.hidden && (ts - lastFxFrameAt >= 30)) {
+        lastFxFrameAt = ts;
+        renderCamFxFrame();
+      }
+      fxRafId = requestAnimationFrame(runFxRafLoop);
     }
 
     function startFxPipeline() {
-      if (!fxCanvas) { fxCanvas = document.createElement("canvas"); fxCanvas.width = 1280; fxCanvas.height = 720; fxCtx = fxCanvas.getContext("2d"); }
+      if (!fxCanvas) { fxCanvas = document.createElement("canvas"); fxCanvas.width = 854; fxCanvas.height = 480; fxCtx = fxCanvas.getContext("2d", { alpha: false }); }
       if (needsSegmentation()) ensureSelfieSegmentation();
       renderCamFxFrame();
       if (!fxStream) fxStream = fxCanvas.captureStream(30);
+      if (!fxRafId) fxRafId = requestAnimationFrame(runFxRafLoop);
       if (!fxWorker && !fxLoopTimer) {
         try {
-          const code = `let t=null; self.onmessage=(e)=>{ if(e.data==="start"){clearInterval(t);t=setInterval(()=>self.postMessage(0),33);} else if(e.data==="stop"){clearInterval(t);t=null;} };`;
+          const code = `let t=null; self.onmessage=(e)=>{ if(e.data==="start"){clearInterval(t);t=setInterval(()=>self.postMessage(0),50);} else if(e.data==="stop"){clearInterval(t);t=null;} };`;
           fxWorkerUrl = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
-          fxWorker = new Worker(fxWorkerUrl); fxWorker.onmessage = renderCamFxFrame; fxWorker.postMessage("start");
-        } catch { fxLoopTimer = setInterval(renderCamFxFrame, 33); }
+          fxWorker = new Worker(fxWorkerUrl); fxWorker.onmessage = () => { if (document.hidden) renderCamFxFrame(); }; fxWorker.postMessage("start");
+        } catch { fxLoopTimer = setInterval(() => { if (document.hidden) renderCamFxFrame(); }, 50); }
       }
       return fxStream;
     }
 
     function stopFxPipeline() {
+      if (fxRafId) { cancelAnimationFrame(fxRafId); fxRafId = null; }
       if (fxWorker) { fxWorker.postMessage("stop"); fxWorker.terminate(); fxWorker = null; }
       if (fxWorkerUrl) { URL.revokeObjectURL(fxWorkerUrl); fxWorkerUrl = null; }
       if (fxLoopTimer) { clearInterval(fxLoopTimer); fxLoopTimer = null; }
       if (fxStream) { fxStream.getTracks().forEach(t => t.stop()); fxStream = null; }
+      segBusy = false;
     }
 
     function stopRawCamStream() {
@@ -2749,7 +2803,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       fxPreviewOff.classList.toggle("hidden", camEnabled && Boolean(rawCamStream));
       if (needsSegmentation() && typeof SelfieSegmentation === "undefined") { fxStatusPill.textContent = "⚠️ AI BG offline"; fxStatusPill.classList.remove("hidden"); }
       else if (needsSegmentation() && !segReady) { fxStatusPill.textContent = "⏳ Loading AI BG..."; fxStatusPill.classList.remove("hidden"); }
-      else if (needsFxPipeline()) { fxStatusPill.textContent = "✅ FX Active"; fxStatusPill.classList.remove("hidden"); }
+      else if (needsFxPipeline()) { fxStatusPill.textContent = "✅ FX Active (30fps)"; fxStatusPill.classList.remove("hidden"); }
       else fxStatusPill.classList.add("hidden");
     }
 
@@ -2796,7 +2850,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (!(await checkDeviceExists("videoinput"))) { showNoticeBanner("❌ No camera found on this device.", "denied", 5000); return false; }
       try {
         if (!rawCamStream || !rawCamStream.active) {
-          rawCamStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, min: 24 }, facingMode: "user" } });
+          rawCamStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, aspectRatio: { ideal: 16 / 9 }, frameRate: { ideal: 30, min: 20 }, facingMode: "user" } });
           rawCamVideo = document.createElement("video");
           rawCamVideo.muted = true; rawCamVideo.autoplay = true; rawCamVideo.playsInline = true;
           rawCamVideo.srcObject = rawCamStream;
@@ -3057,7 +3111,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     modalCamBtn.onclick = async () => { if (camEnabled) await disableCamera(); else await enableCamera(); };
     modalMicBtn.onclick = async () => { startBackgroundKeepalive(); ensurePipStreamStarted(); await enableMicrophone(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); requestWakeLock(); };
     modalSpeakerBtn.onclick = async () => { startBackgroundKeepalive(); ensurePipStreamStarted(); await useSpeakerOnly(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); requestWakeLock(); };
-    cancelWaitingBtn.onclick = () => { leaveBtn.click(); };
+    cancelWaitingBtn.onclick = () => { performLeaveMeeting(); };
     hostPolicyBtn.onclick = () => { if (isHost) sendSignal({ type: "set_screen_policy", require_approval: !requireScreenApproval }); };
     hostStopShareBtn.onclick = () => { if (isHost) sendSignal({ type: "host_stop_share" }); controlsDock.classList.remove("more-open"); };
 
@@ -3082,7 +3136,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       currentRoomId = roomId; currentMeetingTitle = title || `Room ${roomId}`;
       isLeavingCall = false; wantMicOnJoin = false; wantCamOnJoin = false; micEnabled = false; camEnabled = false; speakerMuted = false; hasJoinedRoom = false; rejoinToken = "";
       waitingUsers = {}; pendingScreenRequests = {}; waitingCount = 0; currentHostId = null; appliedTrackQuality.clear();
-      clearPendingAttachments(); emojiPicker.classList.add("hidden"); camFxModal.classList.add("hidden"); fxPreviewVideo.srcObject = null;
+      clearPendingAttachments(); emojiPicker.classList.add("hidden"); camFxModal.classList.add("hidden"); leaveConfirmModal.classList.add("hidden"); fxPreviewVideo.srcObject = null;
       syncMeetingCountdown(null, null);
       pinnedTileId = null; lastActiveSpeakerTileId = null; lastSpeakingKey = ""; lkSpeakingIds.clear(); seenMsgIds.clear();
       wbOpen = false; wbLocked = false; wbHistory = []; redrawWhiteboard();
@@ -3120,10 +3174,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       sock.onmessage = async (event) => {
         const msg = JSON.parse(event.data);
         if (msg.type === "pong") return;
-        if (msg.type === "room_full") { isLeavingCall = true; alert(msg.reason || "Room is full."); leaveBtn.click(); return; }
+        if (msg.type === "room_full") { isLeavingCall = true; alert(msg.reason || "Room is full."); await performLeaveMeeting(); return; }
         if (msg.type === "waiting_room") { waitingRoomOverlay.classList.remove("hidden"); waitingRoomStatus.textContent = msg.host_present ? "Waiting for the meeting owner to let you in..." : "Waiting for the meeting owner to join and let you in..."; return; }
-        if (msg.type === "join_denied") { isLeavingCall = true; const r = msg.reason || "The meeting owner declined your request to join."; await leaveBtn.onclick(); showNoticeBanner(`❌ ${r}`, "denied", 5000); alert(r); return; }
-        if (msg.type === "meeting_ended") { isLeavingCall = true; const r = msg.reason || "Meeting time limit reached. The meeting has ended."; await leaveBtn.onclick(); showNoticeBanner(`⏰ ${r}`, "denied", 6000); alert(`⏰ ${r}`); return; }
+        if (msg.type === "join_denied") { isLeavingCall = true; const r = msg.reason || "The meeting owner declined your request to join."; await performLeaveMeeting(); showNoticeBanner(`❌ ${r}`, "denied", 5000); alert(r); return; }
+        if (msg.type === "meeting_ended") { isLeavingCall = true; const r = msg.reason || "Meeting time limit reached. The meeting has ended."; await performLeaveMeeting(); showNoticeBanner(`⏰ ${r}`, "denied", 6000); alert(`⏰ ${r}`); return; }
         if (msg.type === "meeting_time_warning") { showTimeWarningBanner(msg.minutes_left || 1); return; }
         if (msg.type === "meeting_extended") { showNoticeBanner(`⏱️ ${msg.by || "Host"} extended the meeting by ${msg.minutes || 15} minutes.`, "approved", 4000); return; }
 
@@ -3193,11 +3247,12 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     }
 
     copyCallLinkBtn.onclick = () => copyText(getMeetingUrl(currentRoomId), copyCallLinkBtn);
-    leaveBtn.onclick = async () => {
+
+    async function performLeaveMeeting() {
       isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); wsPingTimer = null;
       clearInterval(realtimeSyncTimer); realtimeSyncTimer = null; appliedTrackQuality.clear();
       clearPendingAttachments(); emojiPicker.classList.add("hidden"); imgLightboxClose.click();
-      camFxModal.classList.add("hidden"); fxPreviewVideo.srcObject = null;
+      camFxModal.classList.add("hidden"); leaveConfirmModal.classList.add("hidden"); fxPreviewVideo.srcObject = null;
       syncMeetingCountdown(null, null);
       await exitFloatingPip(); stopPipStream(); stopBackgroundKeepalive(); await releaseWakeLock();
       clearTimeout(participantsRenderTimer); participantsRenderTimer = null; clearTimeout(dmRefreshTimer); dmRefreshTimer = null;
@@ -3222,7 +3277,17 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       unreadPublic = 0; unreadPrivate = 0; updateUnreadBadges(); switchChatTab("public");
       callView.classList.add("hidden"); lobbyView.classList.remove("hidden");
       checkUrlForRoom(); if (isMainHostServer) { loadMeetings(); loadRecordings(); }
+    }
+
+    leaveBtn.onclick = () => {
+      leaveConfirmMsg.textContent = isRecordingLocally
+        ? "Are you sure you want to leave this meeting? Your active recording will stop and save first."
+        : "Are you sure you want to leave this meeting?";
+      leaveConfirmModal.classList.remove("hidden");
     };
+    leaveConfirmNo.onclick = () => { leaveConfirmModal.classList.add("hidden"); };
+    leaveConfirmModal.onclick = (e) => { if (e.target === leaveConfirmModal) leaveConfirmModal.classList.add("hidden"); };
+    leaveConfirmYes.onclick = async () => { await performLeaveMeeting(); };
 
     function handlePageExit() {
       isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); clearInterval(realtimeSyncTimer);
