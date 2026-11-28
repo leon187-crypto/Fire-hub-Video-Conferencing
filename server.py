@@ -111,6 +111,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       --wait-box-text: #92400e;
     }
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    html, body, #call-view { overscroll-behavior-y: contain; }
     body { margin: 0; background: var(--bg-page); color: var(--text-main); min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
     .hidden, .page-hidden { display: none !important; }
     .mobile-only { display: none !important; }
@@ -3200,6 +3201,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     camBtn.onclick = async () => { if (camEnabled) await disableCamera(); else await enableCamera(); };
     modalCamBtn.onclick = async () => { if (camEnabled) await disableCamera(); else await enableCamera(); };
     modalMicBtn.onclick = async () => { startBackgroundKeepalive(); ensurePipStreamStarted(); await enableMicrophone(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); requestWakeLock(); };
+    modalMicBtn.onclick = async () => { pushMeetingBackGuard(); startBackgroundKeepalive(); ensurePipStreamStarted(); await enableMicrophone(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); requestWakeLock(); };
+    modalSpeakerBtn.onclick = async () => { pushMeetingBackGuard(); startBackgroundKeepalive(); ensurePipStreamStarted(); await useSpeakerOnly(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); requestWakeLock(); };
     modalSpeakerBtn.onclick = async () => { startBackgroundKeepalive(); ensurePipStreamStarted(); await useSpeakerOnly(); joinOptionsOverlay.classList.add("hidden"); connectToRoomSocket(false); requestWakeLock(); };
     cancelWaitingBtn.onclick = () => { performLeaveMeeting(); };
     hostPolicyBtn.onclick = () => { if (isHost) sendSignal({ type: "set_screen_policy", require_approval: !requireScreenApproval }); };
@@ -3237,6 +3240,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       refreshDmDropdown(); ensureVideoTile("local", `${getDisplayName()} (You)`, true, localAvatar);
       setTilePlaceholder("local", false, "Camera Disabled"); applyViewMode(currentViewMode); updateControlButtons();
       joinOptionsOverlay.classList.remove("hidden");
+      pushMeetingBackGuard();
     }
 
     function connectToRoomSocket(isReconnect = false) {
@@ -3366,18 +3370,37 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       joinOptionsOverlay.classList.add("hidden"); waitingRoomOverlay.classList.add("hidden"); recordingPill.classList.add("hidden");
       unreadPublic = 0; unreadPrivate = 0; updateUnreadBadges(); switchChatTab("public");
       callView.classList.add("hidden"); lobbyView.classList.remove("hidden");
+      try { if (history.state?.inMeetingGuard) history.replaceState({}, "", location.pathname); } catch {}
       checkUrlForRoom(); if (isMainHostServer) { loadMeetings(); loadRecordings(); }
     }
 
-    leaveBtn.onclick = () => {
+    leaveBtn.onclick = () => { openLeaveConfirmModal(); };
+    leaveConfirmNo.onclick = () => {
+      leaveConfirmModal.classList.add("hidden");
+      if (isInActiveMeeting()) pushMeetingBackGuard();
+    };
+    leaveConfirmModal.onclick = (e) => { if (e.target === leaveConfirmModal) leaveConfirmModal.classList.add("hidden"); };
+    leaveConfirmYes.onclick = async () => { await performLeaveMeeting(); };
+
+    function isInActiveMeeting() {
+      return !isLeavingCall && !callView.classList.contains("hidden");
+    }
+
+    function pushMeetingBackGuard() {
+      if (!currentRoomId) return;
+      try {
+        if (!history.state || !history.state.inMeetingGuard) {
+          history.pushState({ inMeetingGuard: true, roomId: currentRoomId }, "", getMeetingUrl(currentRoomId));
+        }
+      } catch {}
+    }
+
+    function openLeaveConfirmModal() {
       leaveConfirmMsg.textContent = isRecordingLocally
         ? "Are you sure you want to leave this meeting? Your active recording will stop and save first."
         : "Are you sure you want to leave this meeting?";
       leaveConfirmModal.classList.remove("hidden");
-    };
-    leaveConfirmNo.onclick = () => { leaveConfirmModal.classList.add("hidden"); };
-    leaveConfirmModal.onclick = (e) => { if (e.target === leaveConfirmModal) leaveConfirmModal.classList.add("hidden"); };
-    leaveConfirmYes.onclick = async () => { await performLeaveMeeting(); };
+    }
 
     function handlePageExit() {
       isLeavingCall = true; clearTimeout(wsReconnectTimer); clearInterval(wsPingTimer); clearInterval(realtimeSyncTimer);
@@ -3385,11 +3408,30 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (ws) try { ws.close(); } catch {}
       if (lkRoom) try { lkRoom.disconnect(); } catch {}
     }
-    window.addEventListener("beforeunload", handlePageExit);
+
+    // Ask before Refresh / Close Tab (do NOT disconnect here in case user clicks Stay/Cancel)
+    window.addEventListener("beforeunload", (e) => {
+      if (isInActiveMeeting()) {
+        e.preventDefault();
+        e.returnValue = "";
+        return "";
+      }
+    });
+
+    // Only clean up when the page actually unloads
     window.addEventListener("pagehide", handlePageExit);
-    window.addEventListener("popstate", checkUrlForRoom);
-    checkOwnerAccess();
-    checkUrlForRoom();
+
+    // Ask before Browser Back Button / Mobile Back Swipe
+    window.addEventListener("popstate", () => {
+      if (isInActiveMeeting()) {
+        try {
+          history.pushState({ inMeetingGuard: true, roomId: currentRoomId }, "", getMeetingUrl(currentRoomId));
+        } catch {}
+        openLeaveConfirmModal();
+        return;
+      }
+      checkUrlForRoom();
+    });
   </script>
 </body>
 </html>"""
