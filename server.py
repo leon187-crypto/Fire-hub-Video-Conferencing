@@ -530,7 +530,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         <div id="join-options-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="modal-avatar-preview" class="avatar-circle large">U</div><h2 id="join-modal-title">Choose Audio &amp; Camera</h2><p>Select how you want to join this meeting. You can switch anytime on screen.</p><div class="join-choice-grid"><button id="modal-mic-btn" class="active join-choice-btn">🎤 Join with Microphone</button><button id="modal-speaker-btn" class="join-choice-btn">🔊 Join with Only Computer Speaker</button></div><hr style="border: 0; border-top: 1px solid var(--border); width: 100%; margin: 0.2rem 0;" /><div class="row" style="justify-content: center; width: 100%;"><button id="modal-cam-btn" class="secondary" style="flex: 1;">📷 Enable Camera</button><button id="modal-fx-btn" class="secondary" type="button">🎭 BG &amp; Effects</button></div></div></div>
         <div id="waiting-room-overlay" class="stage-overlay hidden"><div class="join-modal"><div id="waiting-avatar-preview" class="avatar-circle large">U</div><div class="spinner"></div><h2>Waiting Room</h2><p id="waiting-room-status">Waiting for the meeting owner to let you in...</p><button id="cancel-waiting-btn" class="danger" style="width: 100%;">Leave Waiting Room</button></div></div>
         <div id="reaction-layer"></div>
-        <div id="audio-container" class="hidden"></div>
+        <div id="audio-container" style="position:fixed;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none;"></div>
         <div id="mobile-view-bar"><button type="button" class="m-view-pill" data-mode="grid">📐 Grid</button><button type="button" class="m-view-pill" data-mode="speaker">🎤 Speaker</button><button type="button" class="m-view-pill" data-mode="sidebar">◫ Sidebar</button><button type="button" class="m-view-pill" data-mode="compact">🪪 Compact</button><span class="swipe-hint">⇄ Swipe</span></div>
         <div id="screen-stage" class="hidden"><div class="screen-stage-header"><div id="screen-stage-label">Screen Share</div><button id="screen-fullscreen-btn" class="secondary hidden" type="button">⛶ Fullscreen</button></div><video id="screen-stage-video" autoplay playsinline title="Double-click for fullscreen"></video></div>
         <div id="whiteboard-stage" class="hidden">
@@ -553,7 +553,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       <aside id="chat-panel" class="side-panel hidden"><div class="chat-tabs-bar"><div class="chat-tabs"><button id="tab-public" class="chat-tab active-tab">Public <span id="badge-public" class="badge hidden">0</span></button><button id="tab-private" class="chat-tab">Personal (DM) <span id="badge-private" class="badge hidden">0</span></button></div><button id="close-chat-btn" class="secondary" style="margin: 0 0.5rem; padding: 0.25rem 0.55rem;">✕</button></div><div id="dm-bar" class="dm-bar hidden"><label for="dm-target" style="margin-bottom: 4px;">Send Private Message To:</label><select id="dm-target"></select></div><div id="public-messages" class="chat-messages"></div><div id="private-messages" class="chat-messages hidden"></div><div id="chat-attach-preview" class="chat-attach-preview hidden"></div><div id="emoji-picker" class="emoji-picker hidden"></div><div class="chat-input-row"><input id="chat-file-input" type="file" multiple class="hidden" /><button id="chat-attach-btn" type="button" class="secondary chat-icon-btn" title="Attach PDF, image, or file">📎</button><button id="chat-emoji-btn" type="button" class="secondary chat-icon-btn" title="Insert emoji">😊</button><input id="chat-input" type="text" placeholder="Message everyone (or Ctrl+V image)..." /><button id="send-chat-btn">Send</button></div></aside>
     </div>
   </div>
-
   <script>
     const VIEW_MODES = ["grid", "speaker", "sidebar", "compact"];
     const VIEW_LABELS = { grid: "📐 Grid View", speaker: "🎤 Speaker View", sidebar: "◫ Sidebar View", compact: "🪪 Compact View" };
@@ -874,12 +873,13 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
     function tuneLowLatencyTrack(track) {
       if (!track) return;
-      try { track.setPlayoutDelay?.(0); } catch {}
+      const isAudio = track.kind === LivekitClient.Track.Kind.Audio;
+      try { track.setPlayoutDelay?.(isAudio ? 0.04 : 0); } catch {}
       try {
         const r = track.receiver;
         if (r) {
-          if ("playoutDelayHint" in r) r.playoutDelayHint = 0;
-          if ("jitterBufferTarget" in r) r.jitterBufferTarget = 0;
+          if ("playoutDelayHint" in r) r.playoutDelayHint = isAudio ? 0.04 : 0;
+          if ("jitterBufferTarget" in r && !isAudio) r.jitterBufferTarget = 0;
         }
       } catch {}
     }
@@ -2895,12 +2895,22 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       stopFxPipeline(); stopRawCamStream();
       setTilePlaceholder("local", false, "Camera Disabled"); updateFxModalUI(); updateControlButtons();
     }
-
+    function updateRemoteScreenAudioLabel(participant, presenterName) {
+      if (!participant || screenStage.classList.contains("hidden")) return;
+      const audioPub = participant.getTrackPublication(LivekitClient.Track.Source.ScreenShareAudio);
+      const hasAudio = Boolean(audioPub && !audioPub.isMuted);
+      screenStageLabel.textContent = hasAudio
+        ? `🖥️ ${presenterName} is presenting (1080p HD + 🔊 Audio)`
+        : `🖥️ ${presenterName} is presenting (1080p HD • 🔇 No screen audio shared)`;
+    }
     function showRemoteScreenStage(presenterName, track, publication) {
       activeScreenPublication = publication || null;
       tuneLowLatencyTrack(track);
       screenStage.classList.remove("hidden"); screenStageVideo.classList.remove("hidden"); screenFullscreenBtn.classList.remove("hidden");
-      onFullscreenChange(); screenStageLabel.textContent = `🖥️ ${presenterName} is presenting (1080p HD)`;
+      onFullscreenChange();
+      const sharerParticipant = publication?.participant || (activeSharer ? lkRoom?.remoteParticipants?.get(activeSharer) : null);
+      if (sharerParticipant) updateRemoteScreenAudioLabel(sharerParticipant, presenterName);
+      else screenStageLabel.textContent = `🖥️ ${presenterName} is presenting (1080p HD)`;
       track.attach(screenStageVideo); applyHighQualityScreenShare();
     }
     async function hideScreenStage() {
@@ -2908,7 +2918,16 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       screenStage.classList.add("hidden"); screenFullscreenBtn.classList.add("hidden"); screenStageVideo.classList.remove("hidden"); screenStageVideo.srcObject = null;
       if (localScreenMirrorVideo) { localScreenMirrorVideo.srcObject = null; localScreenMirrorVideo = null; }
     }
-   async function launchDisplayMedia() {
+    async function stopScreenShare(notifyServer = true) {
+      if (lkRoom) {
+        try { await lkRoom.localParticipant.setScreenShareEnabled(false); } catch {}
+      }
+      isSharingScreen = false;
+      if (notifyServer) sendSignal({ type: "screen_share_stopped" });
+      await hideScreenStage();
+      updateControlButtons();
+    }
+    async function launchDisplayMedia() {
       if (!lkRoom) return;
       const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
       const videoOpts = {
@@ -2919,37 +2938,58 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         ...(isSafari ? {} : { resolution: LivekitClient.ScreenSharePresets.h1080fps30.resolution })
       };
       const pubOpts = { screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30, priority: "high" }, simulcast: false, degradationPreference: "maintain-resolution" };
-      try {
-        await lkRoom.localParticipant.setScreenShareEnabled(true, {
-          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-          ...videoOpts
-        }, pubOpts);
-      } catch (err) {
-        if (err?.name === "NotSupportedError" || err?.name === "TypeError") {
-          try { await lkRoom.localParticipant.setScreenShareEnabled(true, { audio: false, ...videoOpts }, pubOpts); } catch { return; }
-        } else {
-          return;
+      let started = false;
+      for (const audioOpt of [
+        { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        true,
+        false
+      ]) {
+        try {
+          await lkRoom.localParticipant.setScreenShareEnabled(true, { audio: audioOpt, ...videoOpts }, pubOpts);
+          started = true;
+          break;
+        } catch (err) {
+          if (err?.name === "NotAllowedError" || err?.name === "AbortError") return;
         }
       }
+      if (!started) return;
       isSharingScreen = true; screenShareApproved = false; screenRequestPending = false; sendSignal({ type: "screen_share_started" });
       const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.ScreenShare);
       if (pub?.track?.mediaStreamTrack) { localScreenMirrorVideo = document.createElement("video"); localScreenMirrorVideo.muted = true; localScreenMirrorVideo.autoplay = true; localScreenMirrorVideo.playsInline = true; localScreenMirrorVideo.srcObject = new MediaStream([pub.track.mediaStreamTrack]); localScreenMirrorVideo.play().catch(() => {}); }
       const hasScreenAudio = Boolean(lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.ScreenShareAudio)?.track);
       screenStage.classList.remove("hidden"); screenStageVideo.classList.add("hidden"); screenFullscreenBtn.classList.add("hidden");
-      screenStageLabel.textContent = hasScreenAudio ? "🖥️ You are sharing your screen (1080p HD + Audio)" : "🖥️ You are sharing your screen in 1080p HD";
+      screenStageLabel.textContent = hasScreenAudio ? "🖥️ You are sharing your screen (1080p HD + Audio)" : "🖥️ You are sharing your screen in 1080p HD (No Audio)";
+      if (!hasScreenAudio) showNoticeBanner("ℹ️ No screen sound was shared — choose a Browser Tab and check 'Share tab audio' (or 'Share system audio').", "", 5000);
       updateControlButtons();
     }
 
     function applySpeakerMuteState() {
       audioContainer.querySelectorAll("audio").forEach((el) => { el.muted = speakerMuted; });
     }
+    function showUnlockAudioBanner() {
+      if (document.getElementById("unlock-audio-banner")) return;
+      const card = document.createElement("div");
+      card.id = "unlock-audio-banner";
+      card.className = "banner-card waiting-req";
+      card.innerHTML = `<span class="banner-text">🔇 Phone blocked screen/meeting audio autoplay.</span><button class="active" type="button" style="padding:0.4rem 0.75rem;">🔊 Tap to Enable Sound</button>`;
+      card.querySelector("button").onclick = async () => {
+        unlockUiAudio();
+        if (lkRoom) { try { await lkRoom.startAudio(); } catch {} }
+        audioContainer.querySelectorAll("audio").forEach((a) => {
+          a.muted = speakerMuted;
+          if (!speakerMuted) a.play().catch(() => {});
+        });
+        card.remove();
+      };
+      bannerContainer.appendChild(card);
+    }
     function attachRemoteAudio(track) {
       if (!track || track.kind !== LivekitClient.Track.Kind.Audio) return;
       tuneLowLatencyTrack(track);
       const elId = `audio-${track.sid}`; if (document.getElementById(elId)) return;
-      const audioEl = track.attach(); audioEl.id = elId; audioEl.autoplay = true; audioEl.playsInline = true; audioEl.muted = speakerMuted;
+      const audioEl = track.attach(); audioEl.id = elId; audioEl.autoplay = true; audioEl.playsInline = true; audioEl.volume = 1.0; audioEl.muted = speakerMuted;
       audioContainer.appendChild(audioEl);
-      if (!speakerMuted) audioEl.play().catch(() => {});
+      if (!speakerMuted) audioEl.play().catch(() => showUnlockAudioBanner());
       if (track.mediaStreamTrack) attachAudioTrackToRecorder(track.mediaStreamTrack);
       syncWhisperAudioTracks();
     }
@@ -2973,6 +3013,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
       });
 
+      lkRoom.on(LivekitClient.RoomEvent.AudioPlaybackStatusChanged, () => {
+        if (!lkRoom.canPlaybackAudio && !speakerMuted) showUnlockAudioBanner();
+        else document.getElementById("unlock-audio-banner")?.remove();
+      });
       lkRoom.on(LivekitClient.RoomEvent.ParticipantConnected, (p) => {
         if (!p.identity || p.identity === clientId) return;
         peerNames[p.identity] = p.name || peerNames[p.identity] || `User ${p.identity}`;
@@ -3000,9 +3044,13 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         const pid = participant.identity, pName = participant.name || peerNames[pid] || `User ${pid}`, pAvatar = peerAvatars[pid] || "";
         if (!peerNames[pid]) { peerNames[pid] = pName; scheduleDmRefresh(); }
         tuneLowLatencyTrack(track);
-        if (track.kind === LivekitClient.Track.Kind.Audio) attachRemoteAudio(track);
-        else if (publication.source === LivekitClient.Track.Source.ScreenShare) showRemoteScreenStage(pName, track, publication);
-        else if (publication.source === LivekitClient.Track.Source.Camera) {
+        if (track.kind === LivekitClient.Track.Kind.Audio) {
+          attachRemoteAudio(track);
+          if (publication.source === LivekitClient.Track.Source.ScreenShareAudio) updateRemoteScreenAudioLabel(participant, pName);
+        } else if (publication.source === LivekitClient.Track.Source.ScreenShare) {
+          showRemoteScreenStage(pName, track, publication);
+          updateRemoteScreenAudioLabel(participant, pName);
+        } else if (publication.source === LivekitClient.Track.Source.Camera) {
           const tile = ensureVideoTile(pid, pName, true, pAvatar);
           const isFeatured = tile.classList.contains("featured-tile");
           const isVisible = !tile.classList.contains("page-hidden");
@@ -3014,7 +3062,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       });
       lkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, async (track, publication, participant) => {
         if (publication?.trackSid) appliedTrackQuality.delete(publication.trackSid);
-        if (track.kind === LivekitClient.Track.Kind.Audio) { track.detach().forEach(el => el.remove()); document.getElementById(`audio-${track.sid}`)?.remove(); syncWhisperAudioTracks(); }
+        if (track.kind === LivekitClient.Track.Kind.Audio) {
+          track.detach().forEach(el => el.remove()); document.getElementById(`audio-${track.sid}`)?.remove(); syncWhisperAudioTracks();
+          if (publication?.source === LivekitClient.Track.Source.ScreenShareAudio && participant) updateRemoteScreenAudioLabel(participant, participant.name || peerNames[participant.identity] || "Presenter");
+        }
         else if (publication.source === LivekitClient.Track.Source.ScreenShare) { track.detach(screenStageVideo); await hideScreenStage(); }
         else if (publication.source === LivekitClient.Track.Source.Camera) { const tile = document.getElementById(`tile-${participant.identity}`); if (tile) { track.detach(tile.querySelector("video")); setTilePlaceholder(participant.identity, false, "Camera Off"); } }
         scheduleParticipantsRender();
@@ -3030,7 +3081,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         if (pub?.trackSid) appliedTrackQuality.delete(pub.trackSid);
         scheduleParticipantsRender();
       });
-      lkRoom.on(LivekitClient.RoomEvent.TrackMuted, (pub, p) => { if (pub.source === LivekitClient.Track.Source.Camera && p.identity !== clientId) setTilePlaceholder(p.identity, false, "Camera Off"); scheduleParticipantsRender(); });
+      lkRoom.on(LivekitClient.RoomEvent.TrackMuted, (pub, p) => {
+        if (pub.source === LivekitClient.Track.Source.Camera && p.identity !== clientId) setTilePlaceholder(p.identity, false, "Camera Off");
+        if (pub.source === LivekitClient.Track.Source.ScreenShareAudio && p.identity !== clientId) updateRemoteScreenAudioLabel(p, p.name || peerNames[p.identity] || "Presenter");
+        scheduleParticipantsRender();
+      });
       lkRoom.on(LivekitClient.RoomEvent.TrackUnmuted, (pub, p) => {
         if (pub.track) tuneLowLatencyTrack(pub.track);
         if (pub.source === LivekitClient.Track.Source.Camera && p.identity !== clientId) {
@@ -3038,6 +3093,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
           const tile = document.getElementById(`tile-${p.identity}`);
           applyPublicationQuality(pub, tile ? !tile.classList.contains("page-hidden") : true, Boolean(tile?.classList.contains("featured-tile")));
         }
+        if (pub.source === LivekitClient.Track.Source.ScreenShareAudio && p.identity !== clientId) updateRemoteScreenAudioLabel(p, p.name || peerNames[p.identity] || "Presenter");
         scheduleParticipantsRender();
       });
       lkRoom.on(LivekitClient.RoomEvent.LocalTrackPublished, (pub) => {
@@ -3059,6 +3115,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       try { await lkRoom.connect(url, token); }
       catch (err) { showNoticeBanner(`❌ LiveKit error (${url}): ${err?.message || err}`, "denied", 0); return; }
 
+      try { await lkRoom.startAudio(); } catch {}
+      if (!lkRoom.canPlaybackAudio && !speakerMuted) showUnlockAudioBanner();
+
       const lv = document.getElementById("tile-local")?.querySelector("video");
       if (lv?.srcObject) {
         if (lv.srcObject !== fxStream) lv.srcObject.getTracks().forEach(t => t.stop());
@@ -3073,8 +3132,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         for (const pub of participant.trackPublications.values()) {
           if (pub.isSubscribed && pub.track) {
             tuneLowLatencyTrack(pub.track);
-            if (pub.track.kind === LivekitClient.Track.Kind.Audio) attachRemoteAudio(pub.track);
-            else if (pub.source === LivekitClient.Track.Source.ScreenShare) showRemoteScreenStage(pName, pub.track, pub);
+            if (pub.track.kind === LivekitClient.Track.Kind.Audio) { attachRemoteAudio(pub.track); if (pub.source === LivekitClient.Track.Source.ScreenShareAudio) updateRemoteScreenAudioLabel(participant, pName); }
+            else if (pub.source === LivekitClient.Track.Source.ScreenShare) { showRemoteScreenStage(pName, pub.track, pub); updateRemoteScreenAudioLabel(participant, pName); }
             else if (pub.source === LivekitClient.Track.Source.Camera) { pub.track.attach(ensureVideoTile(pid, pName, true, pAvatar).querySelector("video")); setTilePlaceholder(pid, !pub.isMuted, "Camera Off"); }
           }
         }
@@ -3126,9 +3185,15 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     hostJoinPolicyBtn.onclick = () => { if (isHost) sendSignal({ type: "set_join_policy", require_approval: !requireJoinApproval }); };
     useMicBtn.onclick = async () => { await enableMicrophone(); };
     useSpeakerBtn.onclick = async () => { await useSpeakerOnly(); showNoticeBanner("🔊 Switched to Computer Speaker Only (microphone off).", "", 2500); };
-    muteSpeakerBtn.onclick = () => {
+    muteSpeakerBtn.onclick = async () => {
       speakerMuted = !speakerMuted;
       applySpeakerMuteState();
+      if (!speakerMuted) {
+        unlockUiAudio();
+        if (lkRoom) { try { await lkRoom.startAudio(); } catch {} }
+        audioContainer.querySelectorAll("audio").forEach((a) => a.play().catch(() => {}));
+        document.getElementById("unlock-audio-banner")?.remove();
+      }
       updateControlButtons();
       showNoticeBanner(speakerMuted ? "🔇 Speaker muted (incoming audio silenced)." : "🔊 Speaker unmuted.", "", 2500);
     };
