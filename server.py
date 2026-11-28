@@ -1820,6 +1820,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       if (!isRecordingLocally || !lkRoom) return;
       const lm = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.Microphone);
       if (lm?.track?.mediaStreamTrack) attachAudioTrackToRecorder(lm.track.mediaStreamTrack);
+      const lsa = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.ScreenShareAudio);
+      if (lsa?.track?.mediaStreamTrack) attachAudioTrackToRecorder(lsa.track.mediaStreamTrack);
       for (const p of lkRoom.remoteParticipants.values()) {
         for (const pub of p.trackPublications.values()) { if (pub.isSubscribed && pub.track?.kind === LivekitClient.Track.Kind.Audio && pub.track.mediaStreamTrack) attachAudioTrackToRecorder(pub.track.mediaStreamTrack); }
       }
@@ -2906,22 +2908,36 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       screenStage.classList.add("hidden"); screenFullscreenBtn.classList.add("hidden"); screenStageVideo.classList.remove("hidden"); screenStageVideo.srcObject = null;
       if (localScreenMirrorVideo) { localScreenMirrorVideo.srcObject = null; localScreenMirrorVideo = null; }
     }
-    async function launchDisplayMedia() {
+   async function launchDisplayMedia() {
       if (!lkRoom) return;
       const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      try { await lkRoom.localParticipant.setScreenShareEnabled(true, { audio: false, selfBrowserSurface: "exclude", contentHint: "detail", ...(isSafari ? {} : { resolution: LivekitClient.ScreenSharePresets.h1080fps30.resolution }) }, { screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30, priority: "high" }, simulcast: false, degradationPreference: "maintain-resolution" }); }
-      catch { return; }
+      const videoOpts = {
+        selfBrowserSurface: "exclude",
+        surfaceSwitching: "include",
+        systemAudio: "include",
+        contentHint: "detail",
+        ...(isSafari ? {} : { resolution: LivekitClient.ScreenSharePresets.h1080fps30.resolution })
+      };
+      const pubOpts = { screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30, priority: "high" }, simulcast: false, degradationPreference: "maintain-resolution" };
+      try {
+        await lkRoom.localParticipant.setScreenShareEnabled(true, {
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+          ...videoOpts
+        }, pubOpts);
+      } catch (err) {
+        if (err?.name === "NotSupportedError" || err?.name === "TypeError") {
+          try { await lkRoom.localParticipant.setScreenShareEnabled(true, { audio: false, ...videoOpts }, pubOpts); } catch { return; }
+        } else {
+          return;
+        }
+      }
       isSharingScreen = true; screenShareApproved = false; screenRequestPending = false; sendSignal({ type: "screen_share_started" });
       const pub = lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.ScreenShare);
       if (pub?.track?.mediaStreamTrack) { localScreenMirrorVideo = document.createElement("video"); localScreenMirrorVideo.muted = true; localScreenMirrorVideo.autoplay = true; localScreenMirrorVideo.playsInline = true; localScreenMirrorVideo.srcObject = new MediaStream([pub.track.mediaStreamTrack]); localScreenMirrorVideo.play().catch(() => {}); }
+      const hasScreenAudio = Boolean(lkRoom.localParticipant.getTrackPublication(LivekitClient.Track.Source.ScreenShareAudio)?.track);
       screenStage.classList.remove("hidden"); screenStageVideo.classList.add("hidden"); screenFullscreenBtn.classList.add("hidden");
-      screenStageLabel.textContent = "🖥️ You are sharing your screen in 1080p HD"; updateControlButtons();
-    }
-    async function stopScreenShare(notifyServer = true) {
-      isSharingScreen = false;
-      if (lkRoom) try { await lkRoom.localParticipant.setScreenShareEnabled(false); } catch {}
-      if (notifyServer) sendSignal({ type: "screen_share_stopped" });
-      await hideScreenStage(); updateControlButtons();
+      screenStageLabel.textContent = hasScreenAudio ? "🖥️ You are sharing your screen (1080p HD + Audio)" : "🖥️ You are sharing your screen in 1080p HD";
+      updateControlButtons();
     }
 
     function applySpeakerMuteState() {
@@ -3032,6 +3048,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
         else if (pub.source === LivekitClient.Track.Source.Microphone && pub.track?.mediaStreamTrack) { startLocalVoiceMonitor(pub.track.mediaStreamTrack); attachAudioTrackToRecorder(pub.track.mediaStreamTrack); syncWhisperAudioTracks(); }
         else if (pub.source === LivekitClient.Track.Source.ScreenShare && pub.track?.mediaStreamTrack) pub.track.mediaStreamTrack.contentHint = "detail";
+        else if (pub.source === LivekitClient.Track.Source.ScreenShareAudio && pub.track?.mediaStreamTrack) { attachAudioTrackToRecorder(pub.track.mediaStreamTrack); syncWhisperAudioTracks(); }
         scheduleParticipantsRender();
       });
       lkRoom.on(LivekitClient.RoomEvent.LocalTrackUnpublished, async (pub) => {
